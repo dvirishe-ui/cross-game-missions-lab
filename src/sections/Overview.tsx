@@ -1,4 +1,5 @@
-import { DAY_OBSERVATIONS } from '../data/previousCampaign';
+import { DAY_OBSERVATIONS, DAY_RESULTS } from '../data/previousCampaign';
+import { fmtDuration } from '../math/format';
 import { Badge } from '../components/ui';
 import { scrollToId } from '../state/AppContext';
 
@@ -90,23 +91,23 @@ export function Overview() {
             </div>
             <div className="stat">
               <span className="k">Calibration status</span>
-              <span className="v sm" style={{ color: 'var(--block)' }}>
-                Telemetry needed
+              <span className="v sm" style={{ color: 'var(--warn)' }}>
+                Partial
               </span>
-              <span className="s">No verified timestamps, player counts, probabilities or throughput</span>
+              <span className="s">Day-level results reported. Bet-level telemetry, probabilities and throughput still needed</span>
             </div>
           </div>
           <hr className="divider" />
           <div className="stack-sm">
             <div className="row-between">
-              <span className="eyebrow">Previous campaign pattern</span>
+              <span className="eyebrow">Previous campaign · time of last prize</span>
               <Badge kind="internal" />
             </div>
             <div className="timeline" aria-label="Previous campaign outcomes by day">
               {DAY_OBSERVATIONS.map((o) => (
                 <a key={o.day} href="#previous" className={`d ${o.tone}`} style={{ textDecoration: 'none', color: 'inherit' }} title={o.detail}>
                   <b>D{o.day}</b>
-                  <i>{o.tone === 'fast' ? 'fast' : o.tone === 'blocked' ? 'blocked' : 'reported OK'}</i>
+                  <i>{o.tone === 'blocked' ? '0 winners' : fmtDuration(DAY_RESULTS.find((r) => r.day === o.day)!.durationMin).replace(' min', 'm').replace(' h ', 'h ')}</i>
                 </a>
               ))}
             </div>
@@ -162,7 +163,8 @@ export function Overview() {
           </div>
           <FirstFinisherFig />
           <p className="small">
-            A large audience can exhaust a limited prize pool long before a typical player finishes. The median player’s time is not the prize-pool duration.
+            A limited prize pool can run out long before a typical player finishes. In the previous campaign, 50 prizes were gone once about one active player in three
+            finished. The median player’s time is not the prize-pool duration.
           </p>
           <a href="#builder-first" className="small">
             First-finisher analysis →

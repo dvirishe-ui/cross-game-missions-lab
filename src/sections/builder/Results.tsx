@@ -2,6 +2,7 @@ import { modelCdf } from '../../math/calculators';
 import type { Scenario, ScenarioResult, UnitResult } from '../../math/campaign';
 import { fmtClock, fmtDuration, fmtNumber, fmtPercent } from '../../math/format';
 import { GAME_BY_ID } from '../../data/games';
+import { resultForDay } from '../../data/previousCampaign';
 import { ProbabilityChart } from '../../components/charts';
 import { Badge, Notice, Stat } from '../../components/ui';
 
@@ -76,10 +77,38 @@ function UnitBlock({ unit, horizon }: { unit: UnitResult; horizon: number }) {
   );
 }
 
+function Baseline({ scenario, result }: { scenario: Scenario; result: ScenarioResult }) {
+  const r = scenario.baselineDay != null ? resultForDay(scenario.baselineDay) : undefined;
+  if (!r) return null;
+  const model = result.ok ? result.units[0]?.first : undefined;
+  return (
+    <div className="card tight flat">
+      <div className="row-between">
+        <h4>Reported Day {r.day} outcome</h4>
+        <Badge kind="internal" />
+      </div>
+      <p className="small">
+        {r.started} players started a task · {r.winners} winners ·{' '}
+        {r.winners > 0 ? `last prize at ${fmtDuration(r.durationMin)} (reported duration)` : `no winners in ${fmtDuration(r.durationMin)}`} · least completed: {r.least.reported} (
+        {r.least.completed})
+      </p>
+      {model ? (
+        <p className="small">
+          Model median final-prize time: <strong>{fmtDuration(model.finalPrize.median)}</strong> vs reported <strong>{r.winners > 0 ? fmtDuration(r.durationMin) : 'never'}</strong>. A
+          large gap means the entered rates or probabilities do not match how Day {r.day} played out.
+        </p>
+      ) : (
+        <p className="tiny muted">Enter the missing game parameters to compare the model with this outcome.</p>
+      )}
+    </div>
+  );
+}
+
 export function Results({ scenario, result }: { scenario: Scenario; result: ScenarioResult }) {
   if (!result.ok) {
     return (
       <div className="stack">
+        <Baseline scenario={scenario} result={result} />
         {result.errors.length > 0 && (
           <Notice tone="block">
             <strong>Fix these inputs:</strong>
@@ -133,6 +162,7 @@ export function Results({ scenario, result }: { scenario: Scenario; result: Scen
         {result.approximate && <Badge kind="assumption">Includes rough approximations</Badge>}
         <span className="badge neutral plain">{result.method === 'exact' ? 'Exact (independence model)' : 'Monte Carlo simulation'}</span>
       </div>
+      <Baseline scenario={scenario} result={result} />
       {result.impossible && <Notice tone="block">At least one mission cannot be completed with these inputs. Under “all tasks required”, nobody can finish.</Notice>}
       <p className="small muted">Simulated model output, not actual SPRIBE performance.</p>
       {result.units.map((u) => (

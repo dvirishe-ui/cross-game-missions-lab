@@ -1,16 +1,11 @@
 import { useMemo, useState } from 'react';
 import { CAMPAIGN_GAMES, GAME_BY_ID, type GameId } from '../data/games';
-import { DAYS, DAY_OBSERVATIONS, KIND_LABEL, PREVIOUS_MISSIONS, diffDays, missionsForDay, type TaskKind } from '../data/previousCampaign';
-import { Badge, GAME_COLOR, GameChip, SectionHead, SelectField } from '../components/ui';
+import { DAYS, DAY_OBSERVATIONS, KIND_LABEL, PREVIOUS_MISSIONS, diffDays, missionsForDay, participation, resultForDay, shareOfStartersNeeded, type TaskKind } from '../data/previousCampaign';
+import { fmtDuration, fmtNumber, fmtPercent } from '../math/format';
+import { ReportedResults } from './ReportedResults';
+import { Badge, GAME_COLOR, GameChip, Notice, SectionHead, SelectField, Stat } from '../components/ui';
 import { useApp } from '../state/AppContext';
 import { cloneDay } from '../state/scenarios';
-
-const OBS_FIELDS = [
-  { key: 'firstFinisher', label: 'Actual first-finisher time', placeholder: 'e.g. 13:42 local or T+0:38' },
-  { key: 'finalPrize', label: 'Actual final-prize time', placeholder: 'K-th claim timestamp' },
-  { key: 'entrants', label: 'Entrants', placeholder: 'Opted-in players' },
-  { key: 'prizes', label: 'Prize places', placeholder: 'Number available' },
-] as const;
 
 const CHANGE_LABEL = { same: 'Unchanged', changed: 'Changed', added: 'Only in B', removed: 'Only in A' };
 
@@ -27,12 +22,13 @@ export function PreviousCampaign() {
   const obs = DAY_OBSERVATIONS.find((o) => o.day === day)!;
   const diff = useMemo(() => diffDays(dayA, dayB), [dayA, dayB]);
   const dayObs = observations[day] ?? { firstFinisher: '', finalPrize: '', entrants: '', prizes: '' };
+  const res = resultForDay(day)!;
 
   return (
     <section className="section" id="previous">
       <SectionHead id="previous" n={2} title="Previous SPRIBE campaign">
-        The seven-day campaign as run, with the original mission wording. Outcomes are internal observations from our team; no timestamps, player counts or
-        qualifying probabilities were supplied.
+        The seven-day campaign as run, with the original mission wording and the day-level results reported by our team. These are internal observations:
+        aggregates without bet-level timestamps or qualifying probabilities.
       </SectionHead>
 
       <div className="days" role="group" aria-label="Select a campaign day">
@@ -110,38 +106,57 @@ export function PreviousCampaign() {
 
         <article className="card">
           <div className="card-head">
-            <h3>Day {day} actual results</h3>
-            <Badge kind={OBS_FIELDS.every((f) => dayObs[f.key]) ? 'internal' : 'missing'} />
+            <h3>Day {day} reported results</h3>
+            <Badge kind="internal" />
           </div>
-          <p className="small muted">
-            Blank until supplied from telemetry. Values you enter are stored only in this browser and labelled as internal observations.
-          </p>
-          <div className="form-grid">
-            {OBS_FIELDS.map((f) => (
-              <label key={f.key} className="field" htmlFor={`obs-${day}-${f.key}`}>
-                <span className="lbl">
-                  {f.label}
-                  {dayObs[f.key] ? <Badge kind="internal">Entered</Badge> : <Badge kind="missing">Missing</Badge>}
-                </span>
-                <input
-                  id={`obs-${day}-${f.key}`}
-                  className={dayObs[f.key] ? '' : 'is-missing'}
-                  value={dayObs[f.key]}
-                  placeholder={f.placeholder}
-                  onChange={(e) => setObservation(day, f.key, e.target.value)}
-                />
-              </label>
-            ))}
+          <div className="stats">
+            <Stat k="Registered" v={fmtNumber(res.registered)} small />
+            <Stat k="Started ≥1 task" v={fmtNumber(res.started)} s={`${fmtPercent(participation(res), 1)} participation`} small />
+            <Stat k="Winners" v={res.winners} s={res.winners === 0 ? 'No prizes claimed' : `${fmtPercent(shareOfStartersNeeded(res), 1)} of starters`} small />
+            <Stat k="Reported duration" v={fmtDuration(res.durationMin)} s={res.winners === 0 ? 'Event ran to the end' : 'Read as final-prize time'} small />
           </div>
-          <div className="callout">
-            <span className="badge calculated plain">Note</span>
-            <p className="small">
-              <strong>Days 5 and 7 had the same Aviator and Plinko requirements.</strong> Their different reported outcomes cannot be explained by those target
-              counts alone.
-            </p>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th />
+                  <th>Task (as reported)</th>
+                  <th className="num">Completed</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className={res.least.completed === 0 ? 'removed' : undefined}>
+                  <td className="small muted">Least completed</td>
+                  <td>{res.least.reported}</td>
+                  <td className="num">{res.least.completed}</td>
+                </tr>
+                <tr>
+                  <td className="small muted">Most completed</td>
+                  <td>{res.most.reported}</td>
+                  <td className="num">{res.most.completed}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
+          {res.discrepancy && <Notice tone="warn">{res.discrepancy}</Notice>}
+          <label className="field" htmlFor={`obs-${day}-first`}>
+            <span className="lbl">
+              First-finisher time
+              {dayObs.firstFinisher ? <Badge kind="internal">Entered</Badge> : <Badge kind="missing">Missing</Badge>}
+            </span>
+            <input
+              id={`obs-${day}-first`}
+              className={dayObs.firstFinisher ? '' : 'is-missing'}
+              value={dayObs.firstFinisher}
+              placeholder="e.g. 0h 31m after start"
+              onChange={(e) => setObservation(day, 'firstFinisher', e.target.value)}
+            />
+          </label>
+          <p className="tiny muted">Still missing for every day: first-finisher time, per-player completion timestamps, and bet-level telemetry.</p>
         </article>
       </div>
+
+      <ReportedResults />
 
       <article className="card">
         <div className="card-head">

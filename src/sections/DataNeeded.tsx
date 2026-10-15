@@ -227,6 +227,11 @@ export function DataNeeded() {
         What we need from internal telemetry before approving final targets. Use anonymised identifiers only; names, emails and payment information are not
         required and are rejected on import.
       </SectionHead>
+      <Notice tone="info">
+        <strong>Received so far:</strong> day-level totals for Days 1–7 (registered, started a task, duration, winners, least- and most-completed task). See{' '}
+        <a href="#reported-results">reported results</a>. These cannot give completion-time distributions, qualifying probabilities or play rates; the bet-level fields
+        below are still needed.
+      </Notice>
       <div className="grid g2">
         <article className="card">
           <div className="row-between">

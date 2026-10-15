@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import { GAME_BY_ID } from '../data/games';
-import { DAY_OBSERVATIONS } from '../data/previousCampaign';
+import { DAY_RESULTS } from '../data/previousCampaign';
 import { evaluateScenario } from '../math/campaign';
 import { fmtDuration, fmtNumber, fmtPercent } from '../math/format';
 import { useApp } from '../state/AppContext';
@@ -102,22 +102,20 @@ export function Summary({ onClose }: { onClose: () => void }) {
         <h2>Previous campaign (internal observations)</h2>
         <table>
           <thead>
-            <tr><th>Day</th><th>Reported outcome</th><th>First finisher</th><th>Final prize</th><th>Entrants</th><th>Prizes</th></tr>
+            <tr><th>Day</th><th>Registered</th><th>Started</th><th>Duration</th><th>Winners</th><th>Least completed</th><th>First finisher</th></tr>
           </thead>
           <tbody>
-            {DAY_OBSERVATIONS.map((o) => {
-              const ob = observations[o.day];
-              return (
-                <tr key={o.day}>
-                  <td>{o.day}</td>
-                  <td>{o.badge}</td>
-                  <td>{ob?.firstFinisher || 'Missing'}</td>
-                  <td>{ob?.finalPrize || 'Missing'}</td>
-                  <td>{ob?.entrants || 'Missing'}</td>
-                  <td>{ob?.prizes || 'Missing'}</td>
-                </tr>
-              );
-            })}
+            {DAY_RESULTS.map((r) => (
+              <tr key={r.day}>
+                <td>{r.day}</td>
+                <td>{r.registered}</td>
+                <td>{r.started}</td>
+                <td>{fmtDuration(r.durationMin)}</td>
+                <td>{r.winners}</td>
+                <td>{r.least.reported} ({r.least.completed})</td>
+                <td>{observations[r.day]?.firstFinisher || 'Missing'}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
         {s.notes && (

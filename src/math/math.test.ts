@@ -5,7 +5,7 @@ import { atLeastK, combineParallel, combineSequential, evaluateScenario, firstFi
 import { decimalToPercent, fmtDuration, fmtPercent, hoursToMinutes, minutesToHours, percentToDecimal } from './format';
 import { calcEconomics } from './economics';
 import { cloneDay, defaultScenario, illustrativeScenario, newTask, scenarioFromJson, scenarioToJson, experimentB } from '../state/scenarios';
-import { PREVIOUS_MISSIONS, diffDays } from '../data/previousCampaign';
+import { DAY_RESULTS, PREVIOUS_MISSIONS, diffDays, participation } from '../data/previousCampaign';
 import { hoursBetween } from '../data/competitors';
 
 const keno = (p: number) => calcMultiplier({ threshold: 30, condition: 'gte', k: 20, p, rate: 10, deadline: 300, canProduce: 'unknown' });
@@ -258,6 +258,21 @@ describe('data integrity', () => {
     const d = diffDays(5, 7);
     expect(d.find((r) => r.game === 'aviator')!.change).toBe('same');
     expect(d.find((r) => r.game === 'plinko')!.change).toBe('same');
+  });
+  it('reported participation rates match the reported counts', () => {
+    for (const r of DAY_RESULTS) expect(Math.abs(participation(r) * 100 - r.participationPct)).toBeLessThan(0.06);
+  });
+  it('winners never exceed completions of the least-completed task', () => {
+    for (const r of DAY_RESULTS) {
+      expect(r.winners).toBeLessThanOrEqual(r.least.completed);
+      expect(r.least.completed).toBeLessThanOrEqual(r.most.completed);
+    }
+  });
+  it('cloning a day uses players who started and 50 prize places', () => {
+    const s = cloneDay(7);
+    expect(s.entrants).toBe(171);
+    expect(s.prizePlaces).toBe(50);
+    expect(s.baselineDay).toBe(7);
   });
   it('Supabets duration is 53 hours', () => expect(hoursBetween('2026-08-21T18:00', '2026-08-23T23:00')).toBe(53));
   it('scenario JSON round-trips', () => {

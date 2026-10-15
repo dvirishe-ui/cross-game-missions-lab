@@ -86,30 +86,21 @@ export interface DayObservation {
 }
 
 /** Internal observations reported by our team. Not independently verified. */
-export const DAY_OBSERVATIONS: DayObservation[] = [1, 2, 3, 4, 5]
-  .map(
-    (day): DayObservation => ({
-      day,
-      tone: 'fast',
-      badge: 'Prizes claimed too quickly',
-      detail: 'Team report: prizes were claimed too quickly on Days 1–5. No timestamps supplied.',
-    }),
-  )
-  .concat([
-    {
-      day: 6,
-      tone: 'blocked',
-      badge: 'Keno mission not completed',
-      detail:
-        'Team report: nobody completed the Keno mission requiring a multiplier of 30× or more twenty times. Cause not established.',
-    },
-    {
-      day: 7,
-      tone: 'ok',
-      badge: 'Timing reported as working well',
-      detail: 'Team report: the timing worked well. No timestamps, player counts or throughput data supplied.',
-    },
-  ]);
+export const DAY_OBSERVATIONS: DayObservation[] = [
+  { day: 1, tone: 'fast', badge: 'Prizes gone in 1h 20m', detail: 'Team report: 50 winners; reported duration 1h 20m. Prizes were claimed too quickly.' },
+  { day: 2, tone: 'fast', badge: 'Prizes gone in 49m', detail: 'Team report: 50 winners; reported duration 49m. Prizes were claimed too quickly.' },
+  { day: 3, tone: 'fast', badge: 'Prizes gone in 1h 03m', detail: 'Team report: 50 winners; reported duration 1h 03m. Prizes were claimed too quickly.' },
+  { day: 4, tone: 'fast', badge: 'Prizes gone in 1h 31m', detail: 'Team report: 50 winners; reported duration 1h 31m. Prizes were claimed too quickly.' },
+  { day: 5, tone: 'fast', badge: 'Prizes gone in 2h 08m', detail: 'Team report: 50 winners; reported duration 2h 08m. Prizes were claimed too quickly.' },
+  {
+    day: 6,
+    tone: 'blocked',
+    badge: '0 winners · Keno 0 completions',
+    detail:
+      'Team report: 0 winners; nobody completed the Keno mission requiring a multiplier of 30× or more twenty times (0 completions among 191 players who started a task). Cause not established.',
+  },
+  { day: 7, tone: 'ok', badge: '50 winners in 3h 39m', detail: 'Team report: 50 winners; reported duration 3h 39m. The team judged the timing as working well.' },
+];
 
 export function missionsForDay(day: number): CampaignMission[] {
   return PREVIOUS_MISSIONS.filter((m) => m.day === day);
@@ -143,3 +134,64 @@ export const KIND_LABEL: Record<TaskKind, string> = {
   accumulate: 'Accumulated multipliers',
   count: 'Bet / round count',
 };
+
+// ---------------------------------------------------------------------------
+// Day-level results reported by our team. Internal observations: aggregates,
+// not bet-level telemetry. Task labels are kept exactly as reported.
+// ---------------------------------------------------------------------------
+
+export interface ReportedTask {
+  game: GameId;
+  /** Label as written in the report. */
+  reported: string;
+  /** Players who completed this task (as reported). */
+  completed: number;
+}
+
+export interface DayResult {
+  day: number;
+  registered: number;
+  started: number;
+  /** Participation rate as reported (%). */
+  participationPct: number;
+  /** "Duration" as reported, in minutes. */
+  durationMin: number;
+  winners: number;
+  least: ReportedTask;
+  most: ReportedTask;
+  /** Mismatch between the report and the mission dataset, if any. */
+  discrepancy?: string;
+}
+
+export const DAY_RESULTS: DayResult[] = [
+  { day: 1, registered: 1501, started: 158, participationPct: 10.5, durationMin: 80, winners: 50, least: { game: 'pilot-chicken', reported: 'Pilot Chicken – Collect 100x', completed: 64 }, most: { game: 'plinko', reported: 'Plinko – place 100 bets', completed: 84 } },
+  {
+    day: 2,
+    registered: 1302,
+    started: 156,
+    participationPct: 12.0,
+    durationMin: 49,
+    winners: 50,
+    least: { game: 'trader', reported: 'Trader – Place 100 bets', completed: 58 },
+    most: { game: 'aviator', reported: 'Aviator – Catch 30x ×10', completed: 101 },
+    discrepancy:
+      'The report names “Trader – Place 100 bets”, but the Day 2 mission list has Trader “Collect 100× in total” and Keno “Place 100 individual bets”. Confirm which task had 58 completions.',
+  },
+  { day: 3, registered: 1270, started: 164, participationPct: 12.9, durationMin: 63, winners: 50, least: { game: 'aviator', reported: 'Aviator – Catch 30x ×10', completed: 62 }, most: { game: 'plinko', reported: 'Plinko – place 300 bets', completed: 113 } },
+  { day: 4, registered: 1257, started: 157, participationPct: 12.5, durationMin: 91, winners: 50, least: { game: 'plinko', reported: 'Plinko – Catch 15x x10', completed: 50 }, most: { game: 'keno', reported: 'Keno - place 300 bets', completed: 96 } },
+  { day: 5, registered: 1298, started: 150, participationPct: 11.6, durationMin: 128, winners: 50, least: { game: 'aviator', reported: 'Aviator – Catch 30x ×30', completed: 58 }, most: { game: 'goal', reported: 'Goal – place 300 bets', completed: 97 } },
+  { day: 6, registered: 1580, started: 191, participationPct: 12.1, durationMin: 299, winners: 0, least: { game: 'keno', reported: 'Keno – Catch 30x ×20', completed: 0 }, most: { game: 'plinko', reported: 'Plinko – Collect 300x', completed: 88 } },
+  { day: 7, registered: 1530, started: 171, participationPct: 11.2, durationMin: 219, winners: 50, least: { game: 'aviator', reported: 'Aviator – Catch 30x ×30', completed: 52 }, most: { game: 'goal', reported: 'Goal – Collect 300x', completed: 102 } },
+];
+
+export const PRIZE_PLACES_REPORTED = 50;
+
+export function resultForDay(day: number): DayResult | undefined {
+  return DAY_RESULTS.find((r) => r.day === day);
+}
+
+/** Participation rate recomputed from the reported counts (decimal). */
+export const participation = (r: DayResult) => r.started / r.registered;
+
+/** Share of players who started a task that had to finish everything to fill all prize places. */
+export const shareOfStartersNeeded = (r: DayResult, places = PRIZE_PLACES_REPORTED) => places / r.started;

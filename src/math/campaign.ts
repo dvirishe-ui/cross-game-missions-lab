@@ -77,6 +77,8 @@ export interface Scenario {
   samples: number;
   seed: number;
   notes: string;
+  /** Previous-campaign day this scenario was cloned from, for comparison with reported results. */
+  baselineDay?: number;
 }
 
 // ---------------------------------------------------------------------------

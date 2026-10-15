@@ -1,6 +1,6 @@
 import type { AdaptTemplate, Competitor } from '../data/competitors';
 import { GAME_BY_ID, type GameId } from '../data/games';
-import { missionsForDay } from '../data/previousCampaign';
+import { PRIZE_PLACES_REPORTED, missionsForDay, resultForDay } from '../data/previousCampaign';
 import type { BuilderTask, MissionType, Scenario, Stage } from '../math/campaign';
 import { toCsv } from '../math/csv';
 
@@ -74,8 +74,15 @@ export function describeTask(t: Pick<BuilderTask, 'type' | 'target' | 'threshold
 /** Clone a previous-campaign day. Targets are copied; game parameters stay missing. */
 export function cloneDay(day: number): Scenario {
   const s = defaultScenario();
+  const reported = resultForDay(day);
   s.name = `Clone of Day ${day}`;
-  s.origin = `Previous SPRIBE campaign, Day ${day} (targets only)`;
+  s.origin = `Previous SPRIBE campaign, Day ${day} (targets and reported audience)`;
+  s.baselineDay = day;
+  if (reported) {
+    s.entrants = reported.started;
+    s.prizePlaces = PRIZE_PLACES_REPORTED;
+    s.notes = `Entrants = ${reported.started} players who started at least one task on Day ${day}; prize places = ${PRIZE_PLACES_REPORTED} (internal report). Game rates and probabilities are still missing.`;
+  }
   s.tasks = missionsForDay(day).map((m) =>
     newTask({
       game: m.game,
@@ -98,6 +105,7 @@ export function cloneDay(day: number): Scenario {
 export function experimentA(): Scenario {
   const s = cloneDay(6);
   s.name = 'Experiment A: Day 6 with a Keno round-count task';
+  s.baselineDay = undefined;
   s.origin = 'Proposed design (Experiment A)';
   s.tasks = s.tasks.map((t) =>
     t.game === 'keno'
@@ -141,6 +149,7 @@ export function experimentB(): Scenario {
 export function experimentC(): Scenario {
   const s = cloneDay(6);
   s.name = 'Experiment C: alternative Keno route and any K of G';
+  s.baselineDay = undefined;
   s.origin = 'Proposed design (Experiment C)';
   s.completion = 'anyK';
   s.anyK = 5;
