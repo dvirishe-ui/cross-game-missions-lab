@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { DAY_RESULTS, resultForDay } from '../data/previousCampaign';
 import type { GameId } from '../data/games';
 import { fmtDuration } from '../math/format';
-import { calibrate, describeMission, gameMap, simulate, type CalibrationResult, type SimMission, type SimSettings, type SimSummary } from './engine';
-import { SIM_GAMES, chanceAtLeast, oneIn, type SimGame } from './games';
+import { calibrate, describeMission, gameMap, missionChance, simulate, type CalibrationResult, type SimMission, type SimSettings, type SimSummary } from './engine';
+import { KIND_TEXT, SIM_GAMES, chanceAtLeast, fmtX, oneIn, type SimGame } from './games';
 import { CALIBRATION_DAYS, ENGAGED_SHARE_FROM_DATA, simMissionsForDay } from './days';
-import { zeroFinisherCeiling } from './kenoCheck';
+import { GameNotes } from './GameNotes';
 import { RaceChart, Bars } from './charts';
 import { Details } from './Details';
 
@@ -88,10 +88,9 @@ export default function SimApp() {
   const fp = result?.finalPrize;
   const slowest = result ? result.bottleneckShare.indexOf(Math.max(...result.bottleneckShare)) : -1;
   const keno = gmap['keno'];
-  const kenoCeiling = useMemo(
-    () => zeroFinisherCeiling({ k: 20, betsPerMin: keno.betsPerMin * speed, minutes: 299, engaged: Math.round(191 * (engagedPct / 100)), spread }),
-    [keno.betsPerMin, speed, engagedPct, spread],
-  );
+  const keno30 = chanceAtLeast(keno, 30);
+  const kenoBets = 20 / keno30.p;
+  const kenoHours = kenoBets / (keno.betsPerMin * speed) / 60;
 
   return (
     <>
@@ -120,7 +119,7 @@ export default function SimApp() {
           </h1>
           <p className="lede">
             Pick a day from the last campaign or build your own missions. We simulate a few hundred versions of the day, with every player doing all the missions at
-            the same time, and show when the 50th winner usually finishes.
+            the same time, using each game’s real paytable or rules, and show when the 50th winner usually finishes.
           </p>
           <div className="hero-stats">
             <div className="hstat">
@@ -180,7 +179,8 @@ export default function SimApp() {
               <div className="missions">
                 {missions.map((m, i) => {
                   const g = gmap[m.game];
-                  const p = m.kind === 'catch' ? chanceAtLeast(g, m.threshold ?? 1) : null;
+                  const c = m.kind === 'catch' ? chanceAtLeast(g, m.threshold ?? 1) : null;
+                  const p = m.kind === 'catch' ? missionChance(m, g) : null;
                   return (
                     <div key={i} className="mission">
                       <select aria-label="Game" value={m.game} onChange={(e) => editMission(i, { game: e.target.value as GameId })}>
@@ -204,10 +204,33 @@ export default function SimApp() {
                         <input aria-label="Target" type="number" min={1} value={m.target} onChange={(e) => editMission(i, { target: Math.max(1, Number(e.target.value) || 1) })} />
                         {m.kind === 'catch' ? 'times' : m.kind === 'collect' ? '× total' : 'bets'}
                       </label>
-                      {p != null && <span className={`odds ${chanceClass(p)}`} title="Chance per bet (estimate)">{oneIn(p)}</span>}
+                      {p != null && (
+                        <span className={`odds ${chanceClass(p)}`} title={m.chanceOverride != null ? 'Your own chance' : c?.setup}>
+                          {p === 0 ? 'impossible' : oneIn(p)}
+                        </span>
+                      )}
                       <button className="ghost small" aria-label="Remove mission" onClick={() => { setDay('custom'); setMissions(missions.filter((_, j) => j !== i)); }}>
                         ✕
                       </button>
+                      {m.kind === 'catch' && (
+                        <div className="mission-note">
+                          <span>{m.chanceOverride != null ? 'Using your own chance' : c && c.p > 0 ? `Best way: ${c.setup} (pays about ${fmtX(c.pays)})` : c?.setup}</span>
+                          <label className="inline">
+                            Own chance
+                            <input
+                              aria-label="Your own chance per bet in percent"
+                              type="number"
+                              min={0}
+                              max={100}
+                              step="any"
+                              placeholder="—"
+                              value={m.chanceOverride != null ? +(m.chanceOverride * 100).toPrecision(6) : ''}
+                              onChange={(e) => editMission(i, { chanceOverride: e.target.value === '' ? null : Math.min(1, Math.max(0, Number(e.target.value) / 100)) })}
+                            />
+                            %
+                          </label>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -327,15 +350,15 @@ export default function SimApp() {
         <section id="chances" className="sim-section">
           <h2>3 · How likely is each multiplier?</h2>
           <p className="lede small">
-            Chance that one bet reaches at least that multiplier. Where players pick their own cash-out point, aiming for X× wins about RTP ÷ X of the time. For Keno and
-            Plinko the paytable decides, so RTP ÷ X is only the best possible case.
+            Chance that one bet reaches at least that multiplier, using the setup that makes it most likely (hover a cell to see it). Keno, Plinko, Mines and Goal come from
+            their published paytables and rules; Aviator, Pilot Chicken and Trader use crash maths; Keno 80’s paytable was not found.
           </p>
           <div className="table-wrap">
             <table className="odds-table">
               <thead>
                 <tr>
                   <th>Game</th>
-                  <th>How it works</th>
+                  <th>How we know</th>
                   {THRESHOLDS.map((x) => (
                     <th key={x} className="num">
                       {x}×
@@ -349,12 +372,14 @@ export default function SimApp() {
                     <td>
                       <strong>{g.name}</strong>
                     </td>
-                    <td className="small muted">{g.kind === 'shared-crash' ? 'Shared rounds' : g.kind === 'aim' ? 'Pick your cash-out' : 'Paytable: best case'}</td>
+                    <td className="small">
+                      <span className={`kind ${g.kind}`}>{KIND_TEXT[g.kind]}</span>
+                    </td>
                     {THRESHOLDS.map((x) => {
-                      const p = chanceAtLeast(g, x);
+                      const c = chanceAtLeast(g, x);
                       return (
-                        <td key={x} className={`num small odds-cell ${chanceClass(p)}`}>
-                          {oneIn(p)}
+                        <td key={x} className={`num small odds-cell ${c.p === 0 ? 'none' : chanceClass(c.p)}`} title={c.setup}>
+                          {c.p === 0 ? '✕' : oneIn(c.p)}
                         </td>
                       );
                     })}
@@ -363,18 +388,16 @@ export default function SimApp() {
               </tbody>
             </table>
           </div>
-          <p className="tiny muted">
-            The rows look alike because every game uses the same 97% RTP for now. What makes games differ in the simulator is speed (bets per minute), shared Aviator rounds,
-            and how far Keno and Plinko fall short of the best case. Enter SPRIBE’s real paytables and RTPs to sharpen this.
-          </p>
           <div className="legend-row small">
             <span className="odds easy">1 in 10 or better</span>
             <span className="odds mid">1 in 10–33</span>
             <span className="odds hard">1 in 33–100</span>
             <span className="odds rare">rarer than 1 in 100</span>
+            <span className="odds none">✕ not possible</span>
           </div>
+          <GameNotes games={games} />
           <details className="card flat">
-            <summary>Adjust game settings (RTP, speed, paytable)</summary>
+            <summary>Adjust game speed and RTP</summary>
             <div className="table-wrap" style={{ marginTop: 10 }}>
               <table>
                 <thead>
@@ -382,8 +405,7 @@ export default function SimApp() {
                     <th>Game</th>
                     <th>RTP %</th>
                     <th>Bets / min</th>
-                    <th>Paytable vs best case</th>
-                    <th>Where the RTP comes from</th>
+                    <th>RTP source</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -396,16 +418,6 @@ export default function SimApp() {
                       <td style={{ width: 100 }}>
                         <input aria-label={`${g.name} bets per minute`} type="number" step={0.5} min={0.1} value={g.betsPerMin} onChange={(e) => setGame(g.id, { betsPerMin: Math.max(0.1, Number(e.target.value) || 1) })} />
                       </td>
-                      <td style={{ width: 150 }}>
-                        {g.kind === 'paytable' ? (
-                          <span className="input-suffix">
-                            <input aria-label={`${g.name} share of best case`} type="number" min={0} max={100} value={Math.round(g.paytableShare * 1000) / 10} onChange={(e) => setGame(g.id, { paytableShare: Math.min(1, Math.max(0, Number(e.target.value) / 100)) })} />
-                            <span>%</span>
-                          </span>
-                        ) : (
-                          <span className="muted small">—</span>
-                        )}
-                      </td>
                       <td className="small muted">{g.rtpNote}</td>
                     </tr>
                   ))}
@@ -413,8 +425,8 @@ export default function SimApp() {
               </table>
             </div>
             <p className="tiny muted">
-              Bets per minute are starting guesses (Aviator: rounds per minute). The fitted speed factor ×{speed.toFixed(2)} scales them all to match the real days.
-              {calStale && ' You changed game settings, so re-fit to keep the match.'}
+              RTP changes the crash and grid games (Keno and Plinko use their fixed paytables). Bets per minute are starting guesses (Aviator: rounds per minute); the fitted
+              speed factor ×{speed.toFixed(2)} scales them all to match the real days.{calStale && ' You changed settings, so re-fit to keep the match.'}
             </p>
             <button onClick={runCalibration} className={calStale ? 'primary' : undefined}>
               Re-fit to real days
@@ -452,26 +464,18 @@ export default function SimApp() {
             <div className="card">
               <h3>Day 6: why did nobody finish Keno?</h3>
               <p className="small">
-                Mission: catch 30× or more 20 times in Keno. If Keno’s paytable gave the best possible chance of 30× (<strong>{oneIn(chanceAtLeast({ ...keno, paytableShare: 1 }, 30))}</strong> bets), the
-                simulator says most players would have finished it.
+                Keno’s paytable tops out at 100×. The best way to get 30× or more is <strong>{keno30.setup}</strong>, which happens about <strong>{oneIn(keno30.p)}</strong> bets.
               </p>
               <p className="small">
-                The real result was <strong>0 out of 191</strong>. For that to be a normal outcome, the real chance of 30× in Keno must have been about{' '}
-                <strong>{oneIn(kenoCeiling)}</strong> bets or rarer, roughly {Math.round(chanceAtLeast({ ...keno, paytableShare: 1 }, 30) / Math.max(kenoCeiling, 1e-12))}× harder than
-                the best case.
+                Catching it 20 times takes about <strong>{Math.round(kenoBets).toLocaleString('en-US')} bets</strong> on average, roughly <strong>{Math.round(kenoHours)} hours</strong> of
+                non-stop Keno at the fitted speed. Within a 5-hour day that is practically impossible, which matches the real result: 0 completions out of 191 players.
               </p>
               <p className="small muted">
-                Possible reasons: the paytable rarely pays 30×, some setups (number of picks) can’t pay 30× at all, the mission counted “exactly 30×”, or progress wasn’t
-                tracked. Only the game’s paytable and bet data can tell which.
+                For comparison, 30× in Aviator happens about 1 round in 31. The same “30× twenty times” target is roughly {Math.round(chanceAtLeast(gmap['aviator'], 30).p / keno30.p)}× harder in
+                Keno.
               </p>
-              <button
-                className="small"
-                onClick={() => {
-                  setGame('keno', { paytableShare: Math.max(0.001, kenoCeiling / chanceAtLeast({ ...keno, paytableShare: 1 }, 30)) });
-                  pickDay(6);
-                }}
-              >
-                Use that Keno chance and replay Day 6
+              <button className="small" onClick={() => pickDay(6)}>
+                Replay Day 6
               </button>
             </div>
           </div>
@@ -480,8 +484,8 @@ export default function SimApp() {
         <Details />
 
         <footer className="foot">
-          Missions Simulator · SPRIBE internal planning tool. Game chances are estimates from game mechanics and reported RTPs, not official paytables. Results are simulations, not
-          real SPRIBE data.
+          Missions Simulator · SPRIBE internal planning tool. Keno, Plinko, Mines and Goal chances come from paytables and rules published on review sites (checked against 97% RTP);
+          Aviator, Pilot Chicken, Trader and Keno 80 are estimates. Results are simulations, not real SPRIBE data.
         </footer>
       </main>
     </>

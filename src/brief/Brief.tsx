@@ -1,147 +1,267 @@
-import { COMPETITORS, SUPPORTING_SOURCES } from '../data/competitors';
-import { GAME_BY_ID } from '../data/games';
-import { DAYS, DAY_RESULTS, missionsForDay } from '../data/previousCampaign';
-import { fmtDuration } from '../math/format';
+import { useState } from 'react';
+import { CAMPAIGNS, FINDINGS, NETWORK_CAMPAIGNS, TASK_TYPES, type TaskType } from './data';
 
-const TAKEAWAYS = [
-  {
-    title: 'Prizes ran out early',
-    text: 'On every day with winners, all 50 prizes were gone before the 5-hour mark: 49m to 2h 08m on Days 1–5, and 3h 39m on Day 7.',
-  },
-  {
-    title: 'One hard task can block everyone',
-    text: 'Day 6 had 191 active players and 0 winners, because nobody completed Keno “30× or more 20 times”. The cause is not yet known.',
-  },
-  {
-    title: 'The rarest task decides the pace',
-    text: 'Aviator “30× or more” was the least-completed task on Days 3, 5 and 7. Winners can never outnumber completions of the hardest task.',
-  },
-  {
-    title: 'Few players, many winners',
-    text: 'Only about 11–13% of registered players started a task, and about one in three of them won. A small active group empties 50 prizes quickly.',
-  },
-  {
-    title: 'Competitors avoid single blockers',
-    text: 'Rivals use alternative routes (SmartSoft), “complete any 3” rules (Stake), daily caps, or one mission at a time (Pragmatic / Supabets).',
-  },
-];
+function DurationChart() {
+  const dated = CAMPAIGNS.filter((c) => c.hours).sort((a, b) => a.hours! - b.hours!);
+  const max = Math.log10(40 * 24);
+  const min = Math.log10(12);
+  const W = 640;
+  const left = 190;
+  const rowH = 26;
+  const x = (h: number) => left + ((Math.log10(h) - min) / (max - min)) * (W - left - 70);
+  const ticks = [
+    { h: 24, l: '1 day' },
+    { h: 72, l: '3 days' },
+    { h: 168, l: '1 week' },
+    { h: 504, l: '3 weeks' },
+  ];
+  const H = dated.length * rowH + 30;
+  return (
+    <svg className="chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Campaign length, log scale">
+      {ticks.map((t) => (
+        <g key={t.h}>
+          <line className="grid-line" x1={x(t.h)} x2={x(t.h)} y1={0} y2={H - 22} />
+          <text x={x(t.h)} y={H - 6} textAnchor="middle">
+            {t.l}
+          </text>
+        </g>
+      ))}
+      {dated.map((c, i) => (
+        <g key={c.id}>
+          <text x={left - 8} y={i * rowH + 15} textAnchor="end" style={{ fill: 'var(--fg-2)' }}>
+            {c.company}: {c.name.length > 18 ? `${c.name.slice(0, 17)}…` : c.name}
+          </text>
+          <rect x={left} y={i * rowH + 4} width={x(c.hours!) - left} height={rowH - 10} rx={3} fill="var(--violet)" opacity={0.8} />
+          <text x={x(c.hours!) + 6} y={i * rowH + 15}>
+            {c.duration.split(',')[0]}
+          </text>
+        </g>
+      ))}
+    </svg>
+  );
+}
 
 export default function Brief() {
+  const [type, setType] = useState<TaskType | 'all'>('all');
+  const shown = CAMPAIGNS.filter((c) => type === 'all' || c.taskTypes.includes(type));
   return (
     <div className="brief">
       <header className="brief-head">
-        <span className="kicker">SPRIBE · Cross-game promotions · Research brief</span>
-        <h1>Cross-game missions: what we learned</h1>
+        <span className="kicker">Competitor research · Missions</span>
+        <h1>How other companies run missions</h1>
         <p className="lede">
-          A short summary of our last 7-day campaign and what other providers do with missions. All competitor facts link to their published source; our own results
-          are internal team reports.
+          {CAMPAIGNS.length} mission campaigns and tools from Pragmatic Play, Playtech, SmartSoft, Stake, BC.Game, Casumo and BGaming: what tasks they set, how long they run,
+          and how they pay. Every fact links to its published source.
         </p>
       </header>
 
       <section>
-        <h2>Five takeaways</h2>
+        <h2>What they have in common</h2>
         <ol className="takeaways">
-          {TAKEAWAYS.map((t) => (
-            <li key={t.title}>
-              <strong>{t.title}.</strong> {t.text}
+          {FINDINGS.map((f) => (
+            <li key={f.title}>
+              <strong>{f.title}.</strong> {f.text}
             </li>
           ))}
         </ol>
       </section>
 
       <section>
-        <h2>Our last campaign</h2>
-        <p className="small muted">Target: about 5 hours per day, first 50 finishers win, all games playable at the same time.</p>
+        <h2>At a glance</h2>
         <div className="table-wrap">
           <table>
             <thead>
               <tr>
-                <th>Day</th>
-                <th>Missions</th>
-                <th className="num">Started</th>
-                <th className="num">Last prize</th>
-                <th>Hardest task (completions)</th>
+                <th>Company</th>
+                <th>Campaign</th>
+                <th>Length</th>
+                <th>How missions run</th>
+                <th>Prize model</th>
+                <th>Prize pool</th>
               </tr>
             </thead>
             <tbody>
-              {DAYS.map((d) => {
-                const r = DAY_RESULTS.find((x) => x.day === d)!;
-                return (
-                  <tr key={d} className={r.winners === 0 ? 'removed' : undefined}>
-                    <td>
-                      <strong>D{d}</strong>
-                    </td>
-                    <td className="small">
-                      {missionsForDay(d).map((m) => (
-                        <div key={m.game}>
-                          <span className="muted">{GAME_BY_ID[m.game].name}:</span> {m.text}
-                        </div>
-                      ))}
-                    </td>
-                    <td className="num">{r.started}</td>
-                    <td className="num">{r.winners === 0 ? '0 winners' : fmtDuration(r.durationMin)}</td>
-                    <td className="small">
-                      {r.least.reported} ({r.least.completed})
-                    </td>
-                  </tr>
-                );
-              })}
+              {CAMPAIGNS.map((c) => (
+                <tr key={c.id}>
+                  <td>
+                    <strong>{c.company}</strong>
+                    <div className="tiny muted">{c.kind}</div>
+                  </td>
+                  <td className="small">
+                    <a href={`#${c.id}`}>{c.name}</a>
+                    <div className="tiny muted">{c.where}</div>
+                  </td>
+                  <td className="small">{c.duration}</td>
+                  <td className="small">{c.structure}</td>
+                  <td className="small">{c.prizeModel}</td>
+                  <td className="small">{c.prizePool}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
-        <p className="tiny muted">
-          “Last prize” is the reported duration, read as the time the 50th prize was claimed (Day 6: the event ran to the end). Day 2’s report names “Trader – Place 100
-          bets” although the mission list has Trader “Collect 100×”; this needs checking.
-        </p>
       </section>
 
       <section>
-        <h2>What competitors do</h2>
-        <div className="comp-grid">
-          {COMPETITORS.map((c) => (
-            <article key={c.id} className="comp">
-              <span className="kicker">
-                {c.provider} · {c.channel}
-              </span>
-              <h3>{c.title}</h3>
-              <span className="tiny muted">{c.dateText}</span>
-              <ul className="clean small">
-                {c.facts.slice(0, 4).map((f) => (
-                  <li key={f}>{f}</li>
+        <h2>What kind of tasks they choose</h2>
+        <div className="table-wrap">
+          <table className="matrix">
+            <thead>
+              <tr>
+                <th>Campaign</th>
+                {TASK_TYPES.map((t) => (
+                  <th key={t.id} className="num" title={t.label}>
+                    {t.label}
+                  </th>
                 ))}
-              </ul>
-              {c.tasks.length > 0 && (
-                <p className="small">
-                  <span className="muted">Example tasks:</span> {c.tasks.slice(0, 3).map((t) => t.text + (t.reward ? ` → ${t.reward}` : '')).join('; ')}
-                </p>
-              )}
-              <p className="take">{c.takeaway}</p>
-              <a href={c.sourceUrl} target="_blank" rel="noopener noreferrer" className="small">
-                Source ↗
-              </a>
+              </tr>
+            </thead>
+            <tbody>
+              {CAMPAIGNS.map((c) => (
+                <tr key={c.id}>
+                  <td className="small">
+                    {c.company}: {c.name}
+                  </td>
+                  {TASK_TYPES.map((t) => (
+                    <td key={t.id} className="num">
+                      {c.taskTypes.includes(t.id) ? <span className="dot" aria-label="yes">●</span> : ''}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+              <tr className="total">
+                <td className="small">
+                  <strong>Used by</strong>
+                </td>
+                {TASK_TYPES.map((t) => (
+                  <td key={t.id} className="num small">
+                    <strong>{CAMPAIGNS.filter((c) => c.taskTypes.includes(t.id)).length}</strong>
+                  </td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div className="split-2">
+          <div className="card">
+            <h3>Multiplier targets we found</h3>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Campaign</th>
+                    <th>Target × repetitions</th>
+                    <th>Required?</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {CAMPAIGNS.filter((c) => c.targets).map((c) => (
+                    <tr key={c.id}>
+                      <td className="small">
+                        {c.company}: {c.name}
+                      </td>
+                      <td className="small mono">{c.targets}</td>
+                      <td className="small">
+                        {c.id.startsWith('smartsoft') ? 'No: one of two routes' : c.id === 'stake-originals' ? 'No: any 3 of the list' : c.id === 'stake-challenges' ? 'Race, one winner' : 'Optional mission'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="tiny muted">The harder the target, the fewer repetitions, and none of them is required for every player.</p>
+          </div>
+          <div className="card">
+            <h3>How long campaigns run</h3>
+            <DurationChart />
+            <p className="tiny muted">Log scale. Most multi-week campaigns still reset daily, so a player’s real “mission day” is 24 hours.</p>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <div className="row-between">
+          <h2>Campaign details</h2>
+          <label className="field" htmlFor="type-filter" style={{ minWidth: 220 }}>
+            <span className="lbl">Show campaigns using</span>
+            <select id="type-filter" value={type} onChange={(e) => setType(e.target.value as TaskType | 'all')}>
+              <option value="all">Any task type</option>
+              {TASK_TYPES.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+        <div className="comp-grid">
+          {shown.map((c) => (
+            <article key={c.id} id={c.id} className="comp">
+              <span className="kicker">
+                {c.company} · {c.kind}
+              </span>
+              <h3>{c.name}</h3>
+              <dl className="kv small">
+                <dt>Where</dt>
+                <dd>{c.where}</dd>
+                <dt>When</dt>
+                <dd>{c.dates}</dd>
+                <dt>Length</dt>
+                <dd>{c.duration}</dd>
+                <dt>Games</dt>
+                <dd>{c.games}</dd>
+                <dt>Prizes</dt>
+                <dd>
+                  {c.prizeModel}. {c.prizePool}
+                </dd>
+              </dl>
+              <p className="small">{c.structure}</p>
+              <div className="stack-sm">
+                <span className="tiny muted">Tasks</span>
+                <ul className="clean small">
+                  {c.tasks.map((t) => (
+                    <li key={t}>{t}</li>
+                  ))}
+                </ul>
+              </div>
+              {c.rules.length > 0 && <p className="tiny muted">Rules: {c.rules.join(' · ')}</p>}
+              <p className="take">{c.lesson}</p>
+              <div className="row tiny">
+                {c.sources.map((s) => (
+                  <a key={s.url} href={s.url} target="_blank" rel="noopener noreferrer">
+                    {s.label} ↗
+                  </a>
+                ))}
+              </div>
             </article>
           ))}
         </div>
-        <p className="tiny muted">
-          A promotion that lists several eligible games is not proof that players had to play every game. Historical campaigns are shown with their published dates.
-        </p>
       </section>
 
       <section>
-        <h2>Provider tools</h2>
+        <h2>Bigger network promotions (not missions)</h2>
+        <p className="small muted">For scale: what providers spend on leaderboards and drops.</p>
         <ul className="clean small">
-          {SUPPORTING_SOURCES.map((s) => (
-            <li key={s.url}>
-              <strong>{s.title}:</strong> {s.points.join(' ')}{' '}
-              <a href={s.url} target="_blank" rel="noopener noreferrer">
-                Source ↗
-              </a>
+          {NETWORK_CAMPAIGNS.map((n) => (
+            <li key={n.name}>
+              <strong>
+                {n.company}, {n.name}:
+              </strong>{' '}
+              {n.detail}{' '}
+              {n.sources.map((s) => (
+                <a key={s.url} href={s.url} target="_blank" rel="noopener noreferrer">
+                  {s.label} ↗{' '}
+                </a>
+              ))}
             </li>
           ))}
         </ul>
       </section>
 
-      <footer className="foot">SPRIBE internal research. Competitor details are as published on the linked pages; no competitor results or ROI are known.</footer>
+      <footer className="foot">
+        Facts as published on the linked pages, many from operator promo pages and trade press; no competitor results or ROI are public. Past campaigns are shown with their published
+        dates.
+      </footer>
     </div>
   );
 }

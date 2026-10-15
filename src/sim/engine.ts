@@ -1,6 +1,9 @@
 import type { GameId } from '../data/games';
 import { mulberry32, sampleNegBinomAttempts, type Rng } from '../math/rng';
-import { COLLECT_AIM, chanceAtLeast, type SimGame } from './games';
+import { chanceAtLeast, type SimGame } from './games';
+
+/** Players collecting a total cash out around this multiplier. */
+export const COLLECT_AIM = 2;
 
 // Agent-based simulation of one campaign day. Everyone plays all missions at
 // the same time. Times are minutes from the event start.
@@ -14,6 +17,14 @@ export interface SimMission {
   target: number;
   /** catch only: multiplier to reach (×). */
   threshold?: number;
+  /** catch only: your own chance per bet (decimal), overriding the game model. */
+  chanceOverride?: number | null;
+}
+
+/** Chance per bet used for a catch mission. */
+export function missionChance(m: SimMission, g: SimGame): number {
+  if (m.chanceOverride != null) return m.chanceOverride;
+  return chanceAtLeast(g, m.threshold ?? 1).p;
 }
 
 export interface SimSettings {
@@ -70,19 +81,19 @@ function binomial(n: number, p: number, rng: Rng): number {
 
 /** Minutes for one player to finish one mission. */
 function missionTime(m: SimMission, g: SimGame, pace: number, speed: number, rng: Rng, shared: SharedRounds | null): number {
-  if (g.kind === 'shared-crash' && shared) return sharedTime(m, pace, shared, rng);
+  if (g.shared && shared) return sharedTime(m, g, pace, shared, rng);
   const rate = g.betsPerMin * speed * pace;
   if (rate <= 0) return Infinity;
   if (m.kind === 'bets') return m.target / rate;
   if (m.kind === 'catch') {
-    const p = chanceAtLeast(g, m.threshold ?? 1);
+    const p = missionChance(m, g);
     if (p <= 0) return Infinity;
     return sampleNegBinomAttempts(m.target, p, rng) / rate;
   }
-  const wins = Math.ceil(m.target / COLLECT_AIM);
-  const p = chanceAtLeast(g, COLLECT_AIM);
-  if (p <= 0) return Infinity;
-  return sampleNegBinomAttempts(wins, p, rng) / rate;
+  // Collect: each successful cash-out adds roughly `pays` to the total.
+  const c = chanceAtLeast(g, COLLECT_AIM);
+  if (c.p <= 0) return Infinity;
+  return sampleNegBinomAttempts(Math.ceil(m.target / c.pays), c.p, rng) / rate;
 }
 
 /** Shared Aviator rounds for one run: crash points are common to all players. */
@@ -102,10 +113,11 @@ function makeRounds(g: SimGame, speed: number, minutes: number, seed: number): S
   return { minutesPerRound: 1 / perMin, crash };
 }
 
-function sharedTime(m: SimMission, pace: number, r: SharedRounds, rng: Rng): number {
+function sharedTime(m: SimMission, g: SimGame, pace: number, r: SharedRounds, rng: Rng): number {
   // A slower player sits out some rounds; nobody can play rounds faster than they happen.
   const q = Math.min(1, pace);
-  const threshold = m.kind === 'catch' ? m.threshold ?? 1 : m.kind === 'collect' ? COLLECT_AIM : 0;
+  // An override replaces the crash maths with an equivalent threshold.
+  const threshold = m.kind === 'catch' ? (m.chanceOverride != null ? g.rtp / Math.max(m.chanceOverride, 1e-12) : m.threshold ?? 1) : m.kind === 'collect' ? COLLECT_AIM : 0;
   const need = m.kind === 'collect' ? Math.ceil(m.target / COLLECT_AIM) : m.target;
   if (need <= 0) return 0;
   let got = 0;
@@ -123,7 +135,7 @@ export function simulateRun(missions: SimMission[], games: Record<string, SimGam
   const shared = new Map<GameId, SharedRounds>();
   for (const m of missions) {
     const g = games[m.game];
-    if (g.kind === 'shared-crash' && !shared.has(m.game)) shared.set(m.game, makeRounds(g, s.speed, horizon, Math.floor(rng() * 4294967296)));
+    if (g.shared && !shared.has(m.game)) shared.set(m.game, makeRounds(g, s.speed, horizon, Math.floor(rng() * 4294967296)));
   }
   const players: { finish: number; times: number[] }[] = [];
   for (let i = 0; i < engaged; i++) {

@@ -8,7 +8,7 @@ import { join, resolve } from 'node:path';
 const root = resolve(import.meta.dirname, '..');
 const pages = [
   { html: 'index.html', out: 'missions-simulator.html', title: 'Missions Simulator', description: 'Simulate when the last prize goes in a SPRIBE cross-game mission day.' },
-  { html: 'brief.html', out: 'cross-game-missions-brief.html', title: 'Cross-Game Missions Brief', description: 'Short research brief on our last campaign and competitor missions.' },
+  { html: 'brief.html', out: 'cross-game-missions-brief.html', title: 'Competitor Missions', description: 'How other casino companies run missions: task types, durations and prize pools, with sources.' },
 ];
 mkdirSync(join(root, 'dist-single'), { recursive: true });
 

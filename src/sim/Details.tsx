@@ -117,7 +117,8 @@ export function Details() {
       <details className="card flat">
         <summary>Data that would make this more accurate</summary>
         <ul className="clean small" style={{ marginTop: 10 }}>
-          <li>Real Keno and Plinko paytables (chance of each multiplier per setup).</li>
+          <li>Plinko yellow tables, Keno 8–10 pick rows and the Keno 80 paytable (only partly published).</li>
+          <li>Which setups players actually used (Keno picks, Plinko rows and colour, Mines count).</li>
           <li>Bets per minute per game, and how much slower people play when they run several games at once.</li>
           <li>Each player’s opt-in time and mission completion times (not just day totals).</li>
           <li>Whether missions stayed open after the 50 prizes were gone.</li>
@@ -131,18 +132,23 @@ export function Details() {
           <li>Each simulated day creates the players who start, keeps the share who go for the full set, and gives each player a personal speed.</li>
           <li>Everyone plays all missions at once. A player wins when their slowest mission is done; the first 50 winners take the prizes.</li>
           <li>
-            <strong>Aviator</strong> rounds are shared: when a round flies past 30×, everyone in that round catches it. A slower player just skips some rounds. Crash chance:
-            reaching X× happens in RTP ÷ X of rounds.
+            <strong>Keno and Plinko</strong>: exact chances from the published paytables (every table adds up to 97% RTP). Players are assumed to use the setup that best reaches the
+            target.
           </li>
           <li>
-            <strong>Pilot Chicken, Mines, Goal, Trader</strong>: the player picks when to cash out, so aiming for X× works about RTP ÷ X of the time.
+            <strong>Mines and Goal</strong>: exact chances from the grid rules. Goal can never pay more than 9.03×.
           </li>
           <li>
-            <strong>Keno, Plinko</strong>: the paytable decides. RTP ÷ X is the best case; the real chance can be much lower. Adjust it under “Adjust game settings”.
+            <strong>Aviator</strong> rounds are shared: when a round flies past 30×, everyone in that round catches it. Reaching X× happens in about 97% ÷ X of rounds. A slower player just
+            skips some rounds.
           </li>
-          <li>“Collect X× in total” assumes players cash out around 2× each time.</li>
+          <li>
+            <strong>Pilot Chicken and Trader</strong>: best estimate from crash maths, cashing out at X× works about 97% ÷ X of the time. <strong>Keno 80</strong> uses the same formula as a
+            best case because its paytable was not found.
+          </li>
+          <li>“Collect X× in total” assumes players take the easiest win of 2× or more each time.</li>
           <li>One speed factor is fitted so simulated last-prize times match Days 1–5 and 7 as closely as possible.</li>
-          <li>RTPs: 97% is reported for Aviator and Pilot Chicken; for the other games 97% is an assumption until SPRIBE’s own figures are entered.</li>
+          <li>All SPRIBE games are listed at 97% RTP; Keno 80 has one listing at 93.6%.</li>
         </ul>
       </details>
     </section>
