@@ -1,0 +1,13 @@
+/* Research brief: a single reading column, quiet, print-friendly. */
+.brief { max-width: 960px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 40px 64px; display: flex; flex-direction: column; gap: 40px; }
+.brief section { display: flex; flex-direction: column; gap: 14px; }
+.brief-head { display: flex; flex-direction: column; gap: 12px; }
+.brief-head h1 { font-size: clamp(1.9rem, 1.3rem + 2.4vw, 2.9rem); font-weight: 800; letter-spacing: -0.02em; line-height: 1.08; }
+.brief-head .lede { max-width: 64ch; }
+.kicker { font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--aviator); }
+.brief h2 { font-size: 1.35rem; }
+.takeaways { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 10px; max-width: 72ch; }
+.takeaways li::marker { color: var(--aviator); font-family: var(--font-mono); }
+.comp-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); }
+.comp { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.comp .take { border-left: 3px solid var(--violet); padding-left: 10px; font-size: 0.88rem; }
