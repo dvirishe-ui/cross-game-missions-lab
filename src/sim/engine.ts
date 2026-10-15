@@ -228,3 +228,47 @@ export function calibrate(days: CalibrationDay[], games: Record<string, SimGame>
 export function gameMap(list: SimGame[]): Record<string, SimGame> {
   return Object.fromEntries(list.map((g) => [g.id, g]));
 }
+
+// ---------------------------------------------------------------------------
+// Player-count sweep: the same day simulated for many possible turnouts.
+// ---------------------------------------------------------------------------
+
+export const SWEEP_COUNTS = [25, 50, 75, 100, 150, 200, 300, 500, 750, 1000];
+
+export interface SweepPoint {
+  players: number;
+  /** Final-prize time percentiles; Infinity when prizes were still left at the end. */
+  p10: number;
+  median: number;
+  p90: number;
+  pAllClaimed: number;
+  avgWinners: number;
+}
+
+export function sweepPoint(missions: SimMission[], games: Record<string, SimGame>, s: SimSettings, players: number): SweepPoint {
+  const sum = simulate(missions, games, { ...s, starters: players, engagedShare: 1 });
+  const all = sum.runs.map((r) => r.finalPrize ?? Infinity).sort((a, b) => a - b);
+  return {
+    players,
+    p10: pct(all, 0.1),
+    median: pct(all, 0.5),
+    p90: pct(all, 0.9),
+    pAllClaimed: sum.pAllClaimed,
+    avgWinners: sum.avgWinners,
+  };
+}
+
+/** Smallest player count (interpolated) at which all prizes usually go before the end. */
+export function playersToEmptyPrizes(points: SweepPoint[]): number | null {
+  const sorted = [...points].sort((a, b) => a.players - b.players);
+  for (let i = 0; i < sorted.length; i++) {
+    if (sorted[i].pAllClaimed >= 0.5) {
+      if (i === 0) return sorted[0].players;
+      const a = sorted[i - 1];
+      const b = sorted[i];
+      const t = (0.5 - a.pAllClaimed) / (b.pAllClaimed - a.pAllClaimed || 1);
+      return Math.round(a.players + t * (b.players - a.players));
+    }
+  }
+  return null;
+}

@@ -116,3 +116,97 @@ export function Bars({
     </div>
   );
 }
+
+/** Last-prize time across possible turnouts (log scale), with the usual 10–90% range. */
+export function SweepChart({
+  points,
+  eventMinutes,
+  selected,
+  onPick,
+}: {
+  points: { players: number; p10: number; median: number; p90: number; pAllClaimed: number }[];
+  eventMinutes: number;
+  selected: number;
+  onPick: (players: number) => void;
+}) {
+  const W = 640;
+  const H = 280;
+  const m = { l: 52, r: 18, t: 18, b: 42 };
+  const minP = 25;
+  const maxP = 1000;
+  const x = (n: number) => m.l + ((Math.log(n) - Math.log(minP)) / (Math.log(maxP) - Math.log(minP))) * (W - m.l - m.r);
+  const top = eventMinutes * 1.08;
+  const y = (t: number) => m.t + (1 - Math.min(t, top) / top) * (H - m.t - m.b);
+  const cap = (t: number) => (Number.isFinite(t) ? Math.min(t, top) : top);
+  const sorted = [...points].sort((a, b) => a.players - b.players);
+  const band =
+    sorted.length > 1
+      ? `M${sorted.map((p) => `${x(p.players)},${y(cap(p.p90))}`).join('L')}L${[...sorted]
+          .reverse()
+          .map((p) => `${x(p.players)},${y(cap(p.p10))}`)
+          .join('L')}Z`
+      : '';
+  const line = sorted.map((p, i) => `${i ? 'L' : 'M'}${x(p.players)},${y(cap(p.median))}`).join('');
+  const hourStep = eventMinutes > 360 ? 120 : 60;
+  const yTicks: number[] = [];
+  for (let t = 0; t <= eventMinutes + 0.1; t += hourStep) yTicks.push(t);
+  return (
+    <div className="chart-wrap">
+      <svg className="chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Time the last prize goes, by number of players">
+        {yTicks.map((t) => (
+          <g key={t}>
+            <line className="grid-line" x1={m.l} x2={W - m.r} y1={y(t)} y2={y(t)} />
+            <text x={m.l - 8} y={y(t) + 3.5} textAnchor="end">
+              {t / 60}h
+            </text>
+          </g>
+        ))}
+        {[25, 50, 100, 200, 500, 1000].map((n) => (
+          <text key={n} x={x(n)} y={H - m.b + 16} textAnchor="middle">
+            {n}
+          </text>
+        ))}
+        <line className="axis" x1={m.l} x2={W - m.r} y1={H - m.b} y2={H - m.b} />
+        <text x={(m.l + W - m.r) / 2} y={H - 6} textAnchor="middle">
+          Players going for the prizes (log scale)
+        </text>
+        <text x={12} y={(H - m.b + m.t) / 2} textAnchor="middle" transform={`rotate(-90 12 ${(H - m.b + m.t) / 2})`}>
+          Last prize goes at
+        </text>
+        <line x1={m.l} x2={W - m.r} y1={y(eventMinutes)} y2={y(eventMinutes)} stroke="var(--aviator)" strokeDasharray="5 4" />
+        <text x={W - m.r} y={y(eventMinutes) - 5} textAnchor="end" style={{ fill: 'var(--aviator)' }}>
+          event ends
+        </text>
+        {band && <path d={band} fill="var(--sim)" opacity={0.15} />}
+        {line && <path d={line} fill="none" stroke="var(--sim)" strokeWidth={2.2} />}
+        {selected >= minP && selected <= maxP && <line x1={x(selected)} x2={x(selected)} y1={m.t} y2={H - m.b} stroke="var(--warn)" strokeDasharray="2 3" />}
+        {sorted.map((p) => {
+          const left = !Number.isFinite(p.median);
+          return (
+            <g key={p.players} style={{ cursor: 'pointer' }} onClick={() => onPick(p.players)}>
+              <circle cx={x(p.players)} cy={y(cap(p.median))} r={left ? 6 : 5} fill={left ? 'var(--block)' : 'var(--sim)'} stroke="var(--bg)" strokeWidth={1.5}>
+                <title>
+                  {p.players} players: {left ? 'prizes usually left at the end' : `last prize ~${fmtDuration(p.median)}`} · all prizes go in {Math.round(p.pAllClaimed * 100)}% of days
+                </title>
+              </circle>
+            </g>
+          );
+        })}
+      </svg>
+      <div className="legend small">
+        <span>
+          <i style={{ ['--c' as string]: 'var(--sim)' }} />
+          usual time (shaded: 8 in 10 days)
+        </span>
+        <span>
+          <i style={{ ['--c' as string]: 'var(--block)' }} />
+          prizes left at the end
+        </span>
+        <span>
+          <i style={{ ['--c' as string]: 'var(--warn)' }} />
+          your slider
+        </span>
+      </div>
+    </div>
+  );
+}

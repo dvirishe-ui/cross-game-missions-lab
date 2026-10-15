@@ -82,3 +82,24 @@ describe('simulation', () => {
     for (const d of cal.perDay) expect(Math.abs(Math.log(d.simulated / d.reported))).toBeLessThan(0.7);
   });
 });
+
+describe('turnout sweep', () => {
+  it('fewer players than prizes can never claim them all', async () => {
+    const { sweepPoint } = await import('./engine');
+    const p = sweepPoint(simMissionsForDay(2), games, { ...base, speed: 2, runs: 30 }, 25);
+    expect(p.pAllClaimed).toBe(0);
+    expect(p.median).toBe(Infinity);
+  });
+  it('finds the turnout where prizes start running out', async () => {
+    const { playersToEmptyPrizes } = await import('./engine');
+    const pts = [
+      { players: 50, p10: 0, median: Infinity, p90: Infinity, pAllClaimed: 0.2, avgWinners: 40 },
+      { players: 100, p10: 0, median: 200, p90: 250, pAllClaimed: 0.8, avgWinners: 50 },
+    ];
+    expect(playersToEmptyPrizes(pts)).toBe(75);
+  });
+  it('Day 6 never empties the prizes at any turnout', async () => {
+    const { sweepPoint } = await import('./engine');
+    expect(sweepPoint(simMissionsForDay(6), games, { ...base, speed: 2, runs: 20 }, 1000).pAllClaimed).toBe(0);
+  });
+});

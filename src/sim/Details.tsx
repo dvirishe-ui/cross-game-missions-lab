@@ -129,7 +129,8 @@ export function Details() {
       <details className="card flat">
         <summary>How the simulator works</summary>
         <ul className="clean small" style={{ marginTop: 10 }}>
-          <li>Each simulated day creates the players who start, keeps the share who go for the full set, and gives each player a personal speed.</li>
+          <li>Each simulated day creates the chosen number of players going for the prizes and gives each one a personal speed. Turnout is unknown, so the page also runs the day for 25 to 1,000 players.</li>
+          <li>Only the fit to the real days uses a turnout guess: the reported starters × the share who completed the most-completed task (about 60%).</li>
           <li>Everyone plays all missions at once. A player wins when their slowest mission is done; the first 50 winners take the prizes.</li>
           <li>
             <strong>Keno and Plinko</strong>: exact chances from the published paytables (every table adds up to 97% RTP). Players are assumed to use the setup that best reaches the

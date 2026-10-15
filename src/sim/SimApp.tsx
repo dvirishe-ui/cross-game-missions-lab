@@ -2,11 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { DAY_RESULTS, resultForDay } from '../data/previousCampaign';
 import type { GameId } from '../data/games';
 import { fmtDuration } from '../math/format';
-import { calibrate, describeMission, gameMap, missionChance, simulate, type CalibrationResult, type SimMission, type SimSettings, type SimSummary } from './engine';
+import { SWEEP_COUNTS, calibrate, describeMission, gameMap, missionChance, playersToEmptyPrizes, simulate, sweepPoint, type CalibrationResult, type SimMission, type SimSettings, type SimSummary, type SweepPoint } from './engine';
 import { KIND_TEXT, SIM_GAMES, chanceAtLeast, fmtX, oneIn, type SimGame } from './games';
 import { CALIBRATION_DAYS, ENGAGED_SHARE_FROM_DATA, simMissionsForDay } from './days';
 import { GameNotes } from './GameNotes';
-import { RaceChart, Bars } from './charts';
+import { RaceChart, Bars, SweepChart } from './charts';
 import { Details } from './Details';
 
 const SPREADS = [
@@ -25,13 +25,27 @@ function chanceClass(p: number): string {
   return 'rare';
 }
 
+function sweepSentence(points: SweepPoint[], prizes: number, hours: number): string {
+  const cross = playersToEmptyPrizes(points);
+  if (cross == null) return `Even with 1,000 players, the ${prizes} prizes are usually not all won within ${hours} hours: one of the missions is too hard to finish in time.`;
+  const done = [...points].filter((p) => p.pAllClaimed >= 0.5 && Number.isFinite(p.median)).sort((a, b) => a.players - b.players);
+  const last = done[done.length - 1];
+  const first = done[0];
+  // First turnout from which the time stays within 15% of the highest-turnout time.
+  const plateau = done.find((_, i) => done.slice(i).every((q) => Math.abs(q.median - last.median) <= Math.max(10, last.median * 0.15)));
+  const start = `All ${prizes} prizes usually go within ${hours} hours once about ${Math.max(cross, prizes)} players take part (${fmtDuration(first.median)} at ${first.players} players).`;
+  if (plateau && plateau.players < last.players)
+    return `${start} From about ${plateau.players} players it barely changes: the last prize goes at around ${fmtDuration(last.median)} whatever the turnout, because the slowest mission is limited by shared Aviator rounds or rare results, not by how many people play.`;
+  return `${start} More players keep bringing it forward, down to ${fmtDuration(last.median)} at ${last.players} players.`;
+}
+
 export default function SimApp() {
   const [day, setDay] = useState<DayChoice>(7);
   const [missions, setMissions] = useState<SimMission[]>(simMissionsForDay(7));
-  const [starters, setStarters] = useState(171);
+  const [players, setPlayers] = useState(100);
   const [prizes, setPrizes] = useState(50);
   const [hours, setHours] = useState(5);
-  const [engagedPct, setEngagedPct] = useState(Math.round(ENGAGED_SHARE_FROM_DATA * 100));
+  const [sweep, setSweep] = useState<SweepPoint[]>([]);
   const [spread, setSpread] = useState(0.5);
   const [games, setGames] = useState<SimGame[]>(SIM_GAMES);
   const [seed, setSeed] = useState(1);
@@ -42,13 +56,14 @@ export default function SimApp() {
 
   const gmap = useMemo(() => gameMap(games), [games]);
   const speed = cal?.speed ?? 1;
-  const settings: SimSettings = { starters, engagedShare: engagedPct / 100, prizes, eventMinutes: hours * 60, spread, speed, runs: 300, seed };
+  const settings: SimSettings = { starters: players, engagedShare: 1, prizes, eventMinutes: hours * 60, spread, speed, runs: 300, seed };
   const reported = typeof day === 'number' ? resultForDay(day) : undefined;
 
   const runCalibration = () => {
     setBusy(true);
     setTimeout(() => {
-      setCal(calibrate(CALIBRATION_DAYS, gmap, { engagedShare: engagedPct / 100, prizes: 50, eventMinutes: 300, spread, runs: 200, seed: 11 }));
+      // Fitting to the real days needs a turnout guess: reported starters × the share who completed the most-completed task.
+      setCal(calibrate(CALIBRATION_DAYS, gmap, { engagedShare: ENGAGED_SHARE_FROM_DATA, prizes: 50, eventMinutes: 300, spread, runs: 200, seed: 11 }));
       setCalStale(false);
       setBusy(false);
     }, 20);
@@ -65,13 +80,35 @@ export default function SimApp() {
     }, 120);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [missions, gmap, starters, prizes, hours, engagedPct, spread, seed, cal]);
+  }, [missions, gmap, players, prizes, hours, spread, seed, cal]);
+
+  // Sweep over possible turnouts, one player count at a time so the page stays responsive.
+  useEffect(() => {
+    if (!cal || !missions.length) {
+      setSweep([]);
+      return;
+    }
+    let cancelled = false;
+    const points: SweepPoint[] = [];
+    setSweep([]);
+    const next = (i: number) => {
+      if (cancelled || i >= SWEEP_COUNTS.length) return;
+      points.push(sweepPoint(missions, gmap, { ...settings, runs: 60, seed: 5 }, SWEEP_COUNTS[i]));
+      setSweep([...points]);
+      setTimeout(() => next(i + 1), 0);
+    };
+    const t = setTimeout(() => next(0), 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [missions, gmap, prizes, hours, spread, cal]);
 
   const pickDay = (d: DayChoice) => {
     setDay(d);
     if (d !== 'custom') {
       setMissions(simMissionsForDay(d));
-      setStarters(resultForDay(d)!.started);
       setPrizes(50);
       setHours(5);
     }
@@ -105,6 +142,7 @@ export default function SimApp() {
           <nav className="sim-nav" aria-label="Sections">
             <a href="#setup">Set up</a>
             <a href="#results">Results</a>
+            <a href="#turnout">Turnout</a>
             <a href="#chances">Game chances</a>
             <a href="#real-days">Real days</a>
             <a href="#info">All info</a>
@@ -123,7 +161,7 @@ export default function SimApp() {
           </p>
           <div className="hero-stats">
             <div className="hstat">
-              <span className="k">Last prize goes at</span>
+              <span className="k">Last prize goes at · {players} players</span>
               <span className="v">{!result ? '—' : fp && Number.isFinite(fp.median) ? fmtDuration(fp.median) : 'Not in time'}</span>
               <span className="s">
                 {!result
@@ -240,11 +278,20 @@ export default function SimApp() {
 
             <div className="card">
               <h3>Players and prizes</h3>
+              <label className="field" htmlFor="s-players">
+                <span className="lbl">
+                  <span>Players going for the prizes</span>
+                  <strong className="num" style={{ color: 'var(--fg)', fontSize: '1rem' }}>
+                    {players}
+                  </strong>
+                </span>
+                <input id="s-players" type="range" min={10} max={1000} step={5} value={players} onChange={(e) => setPlayers(Number(e.target.value))} />
+              </label>
+              <p className="tiny muted">
+                Nobody knows the turnout in advance, so section 3 runs the day for 25 to 1,000 players. This slider picks one turnout for the detailed view. For reference, the last
+                campaign had 150–191 players a day starting at least one task, and not all of them went for the full set.
+              </p>
               <div className="form-grid">
-                <label className="field" htmlFor="s-starters">
-                  <span className="lbl">Players who start</span>
-                  <input id="s-starters" type="number" min={1} value={starters} onChange={(e) => setStarters(Math.max(1, Number(e.target.value) || 1))} />
-                </label>
                 <label className="field" htmlFor="s-prizes">
                   <span className="lbl">Prizes</span>
                   <input id="s-prizes" type="number" min={1} value={prizes} onChange={(e) => setPrizes(Math.max(1, Number(e.target.value) || 1))} />
@@ -252,13 +299,6 @@ export default function SimApp() {
                 <label className="field" htmlFor="s-hours">
                   <span className="lbl">Event length (hours)</span>
                   <input id="s-hours" type="number" min={0.5} step={0.5} value={hours} onChange={(e) => setHours(Math.max(0.5, Number(e.target.value) || 5))} />
-                </label>
-                <label className="field" htmlFor="s-engaged">
-                  <span className="lbl">Go for the full set</span>
-                  <span className="input-suffix">
-                    <input id="s-engaged" type="number" min={1} max={100} value={engagedPct} onChange={(e) => setEngagedPct(Math.min(100, Math.max(1, Number(e.target.value) || 1)))} />
-                    <span>%</span>
-                  </span>
                 </label>
               </div>
               <div className="stack-sm">
@@ -271,10 +311,6 @@ export default function SimApp() {
                   ))}
                 </div>
               </div>
-              <p className="tiny muted">
-                “Go for the full set” defaults to {Math.round(ENGAGED_SHARE_FROM_DATA * 100)}%: on average that share of starters completed the most-completed task in the real
-                campaign.
-              </p>
             </div>
           </div>
         </section>
@@ -296,7 +332,7 @@ export default function SimApp() {
               <p className="headline">
                 {fp && Number.isFinite(fp.median) ? (
                   <>
-                    In a typical simulated day the {prizes}th winner finishes after <strong>{fmtDuration(fp.median)}</strong>.{' '}
+                    With {players} players, the {prizes}th winner usually finishes after <strong>{fmtDuration(fp.median)}</strong>.{' '}
                     {fp.median < hours * 60 * 0.6 ? 'That is well before the end of the event: prizes run out early.' : fp.median < hours * 60 ? 'That is fairly close to the end of the event.' : ''}
                   </>
                 ) : (
@@ -347,8 +383,54 @@ export default function SimApp() {
           )}
         </section>
 
+        <section id="turnout" className="sim-section">
+          <h2>3 · What if more or fewer players join?</h2>
+          <p className="lede small">The same day simulated for 25 to 1,000 players going for the prizes. Click a point to see that turnout in detail.</p>
+          <div className="card">
+            <SweepChart points={sweep} eventMinutes={hours * 60} selected={players} onPick={setPlayers} />
+            {sweep.length < SWEEP_COUNTS.length && (
+              <p className="tiny muted">
+                Simulating turnout {sweep.length + 1} of {SWEEP_COUNTS.length}…
+              </p>
+            )}
+            {sweep.length === SWEEP_COUNTS.length && <p className="headline small">{sweepSentence(sweep, prizes, hours)}</p>}
+            {sweep.length > 0 && (
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th className="num">Players</th>
+                      <th className="num">Last prize (usual)</th>
+                      <th className="num">Range</th>
+                      <th className="num">Chance all {prizes} prizes go</th>
+                      <th className="num">Avg. winners</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sweep.map((p) => (
+                      <tr key={p.players} className={Math.abs(p.players - players) < 1 ? 'hl' : undefined}>
+                        <td className="num">
+                          <button className="ghost small" onClick={() => setPlayers(p.players)}>
+                            {p.players}
+                          </button>
+                        </td>
+                        <td className="num">{Number.isFinite(p.median) ? fmtDuration(p.median) : 'Prizes left'}</td>
+                        <td className="num small muted">
+                          {Number.isFinite(p.p10) ? `${fmtDuration(p.p10)} – ${Number.isFinite(p.p90) ? fmtDuration(p.p90) : 'after end'}` : '—'}
+                        </td>
+                        <td className="num">{Math.round(p.pAllClaimed * 100)}%</td>
+                        <td className="num">{p.avgWinners.toFixed(1)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </section>
+
         <section id="chances" className="sim-section">
-          <h2>3 · How likely is each multiplier?</h2>
+          <h2>4 · How likely is each multiplier?</h2>
           <p className="lede small">
             Chance that one bet reaches at least that multiplier, using the setup that makes it most likely (hover a cell to see it). Keno, Plinko, Mines and Goal come from
             their published paytables and rules; Aviator, Pilot Chicken and Trader use crash maths; Keno 80’s paytable was not found.
@@ -435,7 +517,7 @@ export default function SimApp() {
         </section>
 
         <section id="real-days" className="sim-section">
-          <h2>4 · Does it match the real campaign?</h2>
+          <h2>5 · Does it match the real campaign?</h2>
           <p className="lede small">
             We used one number, a speed factor, to line the simulator up with the real days. Everything else comes from the game rules above.
           </p>
