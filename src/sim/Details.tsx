@@ -7,7 +7,7 @@ import { fmtDuration } from '../math/format';
 export function Details() {
   return (
     <section id="info" className="sim-section">
-      <h2>5 · All the info</h2>
+      <h2>7 · All the info</h2>
       <p className="lede small">Open any part you need.</p>
 
       <details className="card flat">

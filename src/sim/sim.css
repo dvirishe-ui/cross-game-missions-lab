@@ -72,3 +72,9 @@ details.card > summary { font-size: 0.95rem; font-weight: 600; color: var(--fg);
 .game-notes { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); margin-top: 12px; }
 .game-note { border: 1px solid var(--line); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 6px; background: var(--surface); }
 .ok-text { color: var(--ok); }
+.heat th { font-size: 0.62rem; min-width: 54px; white-space: normal; line-height: 1.25; vertical-align: bottom; }
+.heat td { padding: 6px 7px; text-align: center; }
+.heat td:first-child { text-align: left; white-space: nowrap; }
+.heat td.diag { color: var(--muted); }
+.heat tr.hl-row td:first-child { box-shadow: inset 3px 0 0 var(--aviator); }
+.heat th.hl-col { color: var(--aviator); }

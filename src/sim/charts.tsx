@@ -123,11 +123,14 @@ export function SweepChart({
   eventMinutes,
   selected,
   onPick,
+  alreadyAll,
 }: {
   points: { players: number; p10: number; median: number; p90: number; pAllClaimed: number }[];
   eventMinutes: number;
   selected: number;
   onPick: (players: number) => void;
+  /** Most players who already play every mission game (from overlap data). */
+  alreadyAll?: number;
 }) {
   const W = 640;
   const H = 280;
@@ -179,6 +182,15 @@ export function SweepChart({
         </text>
         {band && <path d={band} fill="var(--sim)" opacity={0.15} />}
         {line && <path d={line} fill="none" stroke="var(--sim)" strokeWidth={2.2} />}
+        {alreadyAll != null && alreadyAll >= minP && alreadyAll <= maxP && (
+          <g>
+            <rect x={m.l} y={m.t} width={x(alreadyAll) - m.l} height={H - m.t - m.b} fill="var(--violet)" opacity={0.08} />
+            <line x1={x(alreadyAll)} x2={x(alreadyAll)} y1={m.t} y2={H - m.b} stroke="var(--violet)" strokeDasharray="4 3" />
+            <text x={x(alreadyAll) + 5} y={H - m.b - 8} style={{ fill: 'var(--violet)' }}>
+              ≤ {alreadyAll} already play every game
+            </text>
+          </g>
+        )}
         {selected >= minP && selected <= maxP && <line x1={x(selected)} x2={x(selected)} y1={m.t} y2={H - m.b} stroke="var(--warn)" strokeDasharray="2 3" />}
         {sorted.map((p) => {
           const left = !Number.isFinite(p.median);
@@ -206,6 +218,12 @@ export function SweepChart({
           <i style={{ ['--c' as string]: 'var(--warn)' }} />
           your slider
         </span>
+        {alreadyAll != null && (
+          <span>
+            <i style={{ ['--c' as string]: 'var(--violet)' }} />
+            players who already play all mission games (one operator)
+          </span>
+        )}
       </div>
     </div>
   );

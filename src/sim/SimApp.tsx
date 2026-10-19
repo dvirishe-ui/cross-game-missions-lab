@@ -8,6 +8,7 @@ import { CALIBRATION_DAYS, ENGAGED_SHARE_FROM_DATA, simMissionsForDay } from './
 import { GameNotes } from './GameNotes';
 import { RaceChart, Bars, SweepChart } from './charts';
 import { Details } from './Details';
+import { OverlapSection, missionOverlap } from './Overlap';
 
 const SPREADS = [
   { label: 'Similar players', value: 0.25 },
@@ -143,6 +144,7 @@ export default function SimApp() {
             <a href="#setup">Set up</a>
             <a href="#results">Results</a>
             <a href="#turnout">Turnout</a>
+            <a href="#overlap">Who plays what</a>
             <a href="#chances">Game chances</a>
             <a href="#real-days">Real days</a>
             <a href="#info">All info</a>
@@ -387,7 +389,7 @@ export default function SimApp() {
           <h2>3 · What if more or fewer players join?</h2>
           <p className="lede small">The same day simulated for 25 to 1,000 players going for the prizes. Click a point to see that turnout in detail.</p>
           <div className="card">
-            <SweepChart points={sweep} eventMinutes={hours * 60} selected={players} onPick={setPlayers} />
+            <SweepChart points={sweep} eventMinutes={hours * 60} selected={players} onPick={setPlayers} alreadyAll={missionOverlap(missions).max?.limit} />
             {sweep.length < SWEEP_COUNTS.length && (
               <p className="tiny muted">
                 Simulating turnout {sweep.length + 1} of {SWEEP_COUNTS.length}…
@@ -429,8 +431,10 @@ export default function SimApp() {
           </div>
         </section>
 
+        <OverlapSection missions={missions} />
+
         <section id="chances" className="sim-section">
-          <h2>4 · How likely is each multiplier?</h2>
+          <h2>5 · How likely is each multiplier?</h2>
           <p className="lede small">
             Chance that one bet reaches at least that multiplier, using the setup that makes it most likely (hover a cell to see it). Keno, Plinko, Mines and Goal come from
             their published paytables and rules; Aviator, Pilot Chicken and Trader use crash maths; Keno 80’s paytable was not found.
@@ -517,7 +521,7 @@ export default function SimApp() {
         </section>
 
         <section id="real-days" className="sim-section">
-          <h2>5 · Does it match the real campaign?</h2>
+          <h2>6 · Does it match the real campaign?</h2>
           <p className="lede small">
             We used one number, a speed factor, to line the simulator up with the real days. Everything else comes from the game rules above.
           </p>
