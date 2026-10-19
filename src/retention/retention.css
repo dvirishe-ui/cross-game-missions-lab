@@ -27,3 +27,13 @@ td.down { color: var(--block); }
 .r-periods .inline { display: inline-flex; gap: 6px; align-items: center; text-transform: capitalize; }
 .r-periods input { width: 80px; }
 .notice.small { font-size: 0.85rem; }
+.hstat.hi { border-color: color-mix(in srgb, var(--ok) 50%, var(--line)); }
+.hstat.hi .v { color: var(--ok); }
+.r-chip { font-family: var(--font-mono); font-size: 0.72rem; padding: 2px 8px; border-radius: 999px; }
+.r-chip.up { background: var(--ok-soft); color: var(--ok); }
+.r-chip.down { background: var(--block-soft); color: var(--block); }
+tr.r-total td { background: var(--surface-2); font-weight: 600; }
+.r-page section.card { gap: 14px; }
+.legend { display: flex; flex-wrap: wrap; gap: 12px; color: var(--muted); }
+.legend span { display: inline-flex; gap: 6px; align-items: center; }
+.legend i { width: 14px; height: 6px; border-radius: 3px; background: var(--c); display: inline-block; }
