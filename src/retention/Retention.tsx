@@ -1,4 +1,4 @@
-import { AVIATOR, GAMES, PERIODS, growth, perHundredAviator, total, type GameCounts } from './data';
+import { AVIATOR, GAMES, PERIODS, growth, total, type GameCounts } from './data';
 
 const n = (x: number) => x.toLocaleString('en-US');
 const pct = (x: number) => `${x > 0 ? '+' : ''}${Math.round(x * 100)}%`;
@@ -44,14 +44,11 @@ function Table({ games, totals }: { games: GameCounts[]; totals: Record<'before'
             <th className="num">After</th>
             <th className="num">During vs before</th>
             <th className="num">After vs before</th>
-            <th className="num" title="Game players per 100 Aviator players, before → after">Per 100 Aviator players</th>
           </tr>
         </thead>
         <tbody>
           {games.map((g) => {
             const a = growth(g.players.before, g.players.after);
-            const sb = perHundredAviator(g.players.before, 'before');
-            const sa = perHundredAviator(g.players.after, 'after');
             return (
               <tr key={g.key}>
                 <td>{g.name}</td>
@@ -60,9 +57,6 @@ function Table({ games, totals }: { games: GameCounts[]; totals: Record<'before'
                 <td className="num">{n(g.players.after)}</td>
                 <td className="num">{times(g.players.before, g.players.during)}</td>
                 <td className={`num ${a >= 0 ? 'up' : 'down'}`}>{pct(a)}</td>
-                <td className={`num ${sa >= sb ? 'up' : 'down'}`}>
-                  {sb.toFixed(2)} → {sa.toFixed(2)}
-                </td>
               </tr>
             );
           })}
@@ -75,9 +69,6 @@ function Table({ games, totals }: { games: GameCounts[]; totals: Record<'before'
             <td className="num">{n(totals.after)}</td>
             <td className="num">{times(totals.before, totals.during)}</td>
             <td className="num up">{pct(growth(totals.before, totals.after))}</td>
-            <td className="num">
-              {perHundredAviator(totals.before, 'before').toFixed(2)} → {perHundredAviator(totals.after, 'after').toFixed(2)}
-            </td>
           </tr>
         </tbody>
       </table>
@@ -88,7 +79,6 @@ function Table({ games, totals }: { games: GameCounts[]; totals: Record<'before'
 export default function Retention() {
   const max = Math.max(...promo.flatMap((g) => PERIODS.map((p) => g.players[p])));
   const pc = promo.find((g) => g.key === 'pilot-chicken')!;
-  const aviatorGrowth = growth(AVIATOR.before, AVIATOR.after);
   return (
     <div className="r-page">
       <header className="r-head">
@@ -138,27 +128,6 @@ export default function Retention() {
           ))}
         </div>
         <Table games={promo} totals={promoT} />
-      </section>
-
-      <section className="card">
-        <h2>A fair comparison</h2>
-        <p>
-          Aviator also grew over the same time, from {n(AVIATOR.before)} to {n(AVIATOR.after)} players ({pct(aviatorGrowth)}), so part of the rise is the operator’s overall
-          growth. The last column above removes it by counting each game’s players per 100 Aviator players.
-        </p>
-        <ul className="clean">
-          <li>
-            <strong>Pilot Chicken kept a real gain:</strong> {perHundredAviator(pc.players.before, 'before').toFixed(2)} → {perHundredAviator(pc.players.after, 'after').toFixed(2)} players
-            per 100 Aviator players, about {(perHundredAviator(pc.players.after, 'after') / perHundredAviator(pc.players.before, 'before')).toFixed(1)}× its old level.
-          </li>
-          <li>
-            <strong>Keno held its level</strong> (0.33 → 0.34). Mines, Plinko, Goal and Trader grew in players but slightly less than Aviator.
-          </li>
-          <li>
-            <strong>Promo games together grew {pct(growth(promoT.before, promoT.after))}</strong>, in line with Aviator ({pct(aviatorGrowth)}) and well ahead of the games that were not in the
-            promo ({pct(growth(otherT.before, otherT.after))}).
-          </li>
-        </ul>
       </section>
 
       <section className="card">
