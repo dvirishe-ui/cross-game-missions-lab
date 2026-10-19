@@ -1,4 +1,4 @@
-import { AVIATOR, GAMES, PERIODS, growth, total, type GameCounts } from './data';
+import { GAMES, PERIODS, growth, total, type GameCounts } from './data';
 
 const n = (x: number) => x.toLocaleString('en-US');
 const pct = (x: number) => `${x > 0 ? '+' : ''}${Math.round(x * 100)}%`;
@@ -136,10 +136,6 @@ export default function Retention() {
         <Table games={others} totals={otherT} />
       </section>
 
-      <footer className="foot">
-        Source: player-overlap tables for football.com Nigeria shared by the team. Order of the three snapshots inferred from the numbers: before = {n(AVIATOR.before)} Aviator players,
-        during = {n(AVIATOR.during)}, after = {n(AVIATOR.after)}. The length of each period was not given; if they differ, counts are not directly comparable.
-      </footer>
     </div>
   );
 }
