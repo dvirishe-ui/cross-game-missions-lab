@@ -1,4 +1,4 @@
-import { GAMES, PERIODS, growth, total, type GameCounts } from './data';
+import { GAMES, PERIODS, PERIOD_DATES, growth, total, type GameCounts } from './data';
 
 const n = (x: number) => x.toLocaleString('en-US');
 const pct = (x: number) => `${x > 0 ? '+' : ''}${Math.round(x * 100)}%`;
@@ -68,7 +68,7 @@ function Table({ games, totals }: { games: GameCounts[]; totals: Record<'before'
             <td className="num">{n(totals.during)}</td>
             <td className="num">{n(totals.after)}</td>
             <td className="num">{times(totals.before, totals.during)}</td>
-            <td className="num up">{pct(growth(totals.before, totals.after))}</td>
+            <td className={`num ${growth(totals.before, totals.after) >= 0 ? 'up' : 'down'}`}>{pct(growth(totals.before, totals.after))}</td>
           </tr>
         </tbody>
       </table>
@@ -78,16 +78,24 @@ function Table({ games, totals }: { games: GameCounts[]; totals: Record<'before'
 
 export default function Retention() {
   const max = Math.max(...promo.flatMap((g) => PERIODS.map((p) => g.players[p])));
-  const pc = promo.find((g) => g.key === 'pilot-chicken')!;
+  const afterAll = growth(promoT.before, promoT.after);
+  const duringAll = growth(promoT.before, promoT.during);
+  const ranked = [...promo].sort((a, b) => growth(b.players.before, b.players.after) - growth(a.players.before, a.players.after));
+  const best = ranked[0];
+  const holding = promo.filter((g) => growth(g.players.before, g.players.after) >= -0.02);
+  const lower = promo.filter((g) => growth(g.players.before, g.players.after) < -0.02);
+  const names = (gs: GameCounts[]) => gs.map((g) => g.name).join(', ');
   return (
     <div className="r-page">
       <header className="r-head">
         <span className="kicker">football.com Nigeria · Promo games</span>
         <h1>Did players stay after the promo?</h1>
         <p className="lede">
-          Players of the six non-Aviator promo games before, during and after the cross-game promotion. All six still had more players after the promo ended than before it
-          started.
+          Players of the six non-Aviator promo games before, during and after the cross-game promotion. During the promo they had {Math.round(duringAll * 100)}% more players; after it, they were
+          {afterAll >= 0 ? ` still ${pct(afterAll)} above` : ` back near`} their level before the promo ({pct(afterAll)}).
+          {holding.length > 0 && ` ${names(holding)} held ${holding.length === 1 ? 'its' : 'their'} players${lower.length ? `; ${names(lower)} dropped below.` : '.'}`}
         </p>
+        {PERIOD_DATES.before && <p className="small muted">Before: {PERIOD_DATES.before}</p>}
       </header>
 
       <section className="r-cards">
@@ -99,15 +107,19 @@ export default function Retention() {
           <span className="s">players before → during → after</span>
         </div>
         <div className="hstat hi">
-          <span className="k">After the promo vs before</span>
-          <span className="v num">{pct(growth(promoT.before, promoT.after))}</span>
-          <span className="s">Games not in the promo: {pct(growth(otherT.before, otherT.after))}</span>
+          <span className="k">During the promo vs before</span>
+          <span className="v num">{pct(duringAll)}</span>
+          <span className="s">
+            After the promo vs before: {pct(afterAll)} · games not in the promo: {pct(growth(otherT.before, otherT.after))}
+          </span>
         </div>
         <div className="hstat">
-          <span className="k">Biggest lasting gain</span>
-          <span className="v num">Pilot Chicken {times(pc.players.before, pc.players.after)}</span>
+          <span className="k">Best after the promo</span>
+          <span className="v num">
+            {best.name} {pct(growth(best.players.before, best.players.after))}
+          </span>
           <span className="s">
-            {n(pc.players.before)} → {n(pc.players.during)} → {n(pc.players.after)} players
+            {n(best.players.before)} → {n(best.players.during)} → {n(best.players.after)} players
           </span>
         </div>
       </section>
