@@ -1,7 +1,8 @@
-import { GAMES, PERIODS, PERIOD_DATES, growth, total, type GameCounts } from './data';
+import { AVIATOR, GAMES, OPERATOR_DIFF, OPERATOR_TOTAL, PERIODS, PERIOD_DATES, growth, total, type GameCounts } from './data';
 
 const n = (x: number) => x.toLocaleString('en-US');
 const pct = (x: number) => `${x > 0 ? '+' : ''}${Math.round(x * 100)}%`;
+const opct = (v: number) => (Math.abs(v) < 0.05 ? '0.0%' : `${v > 0 ? '+' : ''}${v.toFixed(1)}%`);
 const times = (a: number, b: number) => `×${(b / a).toFixed(1)}`;
 const LABEL = { before: 'Before', during: 'During', after: 'After' } as const;
 const COLOR = { before: 'var(--line-2)', during: 'var(--violet)', after: 'var(--sim)' } as const;
@@ -140,6 +141,71 @@ export default function Retention() {
           ))}
         </div>
         <Table games={promo} totals={promoT} />
+      </section>
+
+      <section className="card">
+        <h2>What the operator reported: promo week vs previous week</h2>
+        <p className="small muted">Change in each figure in the promo week compared with the previous week, as sent by the operator.</p>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Game</th>
+                <th className="num">Users</th>
+                <th className="num">Bets</th>
+                <th className="num">Stakes</th>
+                <th className="num">Users P&amp;L</th>
+                <th className="num">Users (our count)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {OPERATOR_DIFF.map((d) => {
+                const g = GAMES.find((x) => x.key === d.key);
+                const ours = d.key === 'aviator' ? growth(AVIATOR.before, AVIATOR.during) : g ? growth(g.players.before, g.players.during) : null;
+                return (
+                  <tr key={d.key}>
+                    <td>{d.name}</td>
+                    {[d.users, d.bets, d.stakes, d.usersPnl].map((v, i) => (
+                      <td key={i} className={`num ${v >= 0 ? 'up' : 'down'}`}>
+                        {opct(v)}
+                      </td>
+                    ))}
+                    <td className="num muted">{ours == null ? '—' : opct(ours * 100)}</td>
+                  </tr>
+                );
+              })}
+              <tr className="r-total">
+                <td>
+                  <strong>Grand total</strong>
+                </td>
+                {[OPERATOR_TOTAL.users, OPERATOR_TOTAL.bets, OPERATOR_TOTAL.stakes, OPERATOR_TOTAL.usersPnl].map((v, i) => (
+                  <td key={i} className={`num ${v >= 0 ? 'up' : 'down'}`}>
+                    {opct(v)}
+                  </td>
+                ))}
+                <td />
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <ul className="clean small">
+          <li>
+            <strong>The operator’s user numbers match ours</strong> (last column), so both sources agree on the jump during the promo.
+          </li>
+          <li>
+            <strong>Bets grew much faster than users</strong> in the promo games: Pilot Chicken +479%, Keno +481%, Trader +430%. Each player bet many more times, as the missions asked.
+          </li>
+          <li>
+            <strong>Stakes grew less than bets,</strong> so the average bet got smaller: Goal stakes fell 75% while bets rose 159%, and Mines stakes rose only 4%. Players chased mission
+            targets with small bets.
+          </li>
+          <li>
+            <strong>Aviator stayed flat</strong> (users −0.1%, stakes −3.4%), and total stakes across these games were −3.1%.
+          </li>
+          <li>
+            <strong>Users P&amp;L rose 249.5% overall,</strong> as reported. Confirm with the operator whether this is players’ winnings or players’ net result before reading more into it.
+          </li>
+        </ul>
       </section>
 
       <section className="card">

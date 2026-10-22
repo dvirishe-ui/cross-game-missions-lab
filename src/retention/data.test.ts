@@ -19,3 +19,13 @@ describe('before / during / after data', () => {
     expect(growth(total(promo, 'before'), total(promo, 'after'))).toBeCloseTo(-0.053, 3);
   });
 });
+
+describe('operator report', () => {
+  it('its user changes match our during-vs-before counts within 5 points', async () => {
+    const { OPERATOR_DIFF, GAMES, AVIATOR } = await import('./data');
+    for (const d of OPERATOR_DIFF) {
+      const ours = d.key === 'aviator' ? AVIATOR.during / AVIATOR.before - 1 : (() => { const g = GAMES.find((x) => x.key === d.key)!; return g.players.during / g.players.before - 1; })();
+      expect(Math.abs(ours * 100 - d.users), d.key).toBeLessThan(5);
+    }
+  });
+});

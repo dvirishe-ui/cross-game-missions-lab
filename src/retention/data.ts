@@ -50,3 +50,25 @@ export function total(games: GameCounts[], p: Period): number {
   return games.reduce((a, x) => a + x.players[p], 0);
 }
 
+
+/** Operator's own report: change during the promo vs before, in % (as sent, shared 22 Oct 2026). */
+export interface OperatorDiff {
+  key: string;
+  name: string;
+  users: number;
+  bets: number;
+  stakes: number;
+  usersPnl: number;
+}
+
+export const OPERATOR_DIFF: OperatorDiff[] = [
+  { key: 'aviator', name: 'Aviator', users: -0.1, bets: -1.7, stakes: -3.4, usersPnl: 304.2 },
+  { key: 'pilot-chicken', name: 'Pilot Chicken', users: 118.2, bets: 479.4, stakes: 275.5, usersPnl: 737.8 },
+  { key: 'keno', name: 'Keno', users: 207.7, bets: 480.9, stakes: 197.0, usersPnl: 163.8 },
+  { key: 'trader', name: 'Trader', users: 168.0, bets: 429.6, stakes: 114.5, usersPnl: 156.6 },
+  { key: 'goal', name: 'Goal', users: 120.8, bets: 158.8, stakes: -74.8, usersPnl: -46.4 },
+  { key: 'plinko', name: 'Plinko', users: 31.0, bets: 187.7, stakes: 120.3, usersPnl: 122.7 },
+  { key: 'mines', name: 'Mines', users: 26.7, bets: 64.3, stakes: 4.4, usersPnl: -82.4 },
+];
+
+export const OPERATOR_TOTAL = { users: 6.1, bets: 28.8, stakes: -3.1, usersPnl: 249.5 };
