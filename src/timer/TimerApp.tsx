@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { DAY_RESULTS } from '../data/previousCampaign';
 import type { GameId } from '../data/games';
 import { gameMap, missionChance, type SimMission } from '../sim/engine';
@@ -6,6 +6,7 @@ import { SIM_GAMES, chanceAtLeast, fmtX, oneIn } from '../sim/games';
 import { simMissionsForDay } from '../sim/days';
 import { AVIATOR_SOURCES, DEFAULT_CLOCK, chanceAtLeastHits, clockBounds, flightSec, hitsPerHour, meanRoundSec, roundsPerHour, type AviatorClock } from './clock';
 import { AUTO_PLAYERS, FIT_DAYS } from './days';
+import { randomSet, suggestedSet } from './generate';
 import { goneByCurve, simulateDay, suggestTarget, type Suggestion, type TimerResult, type TimerSettings } from './model';
 
 /** Auto pace of the non-Aviator games, fitted to Days 1–5 and 7 with everyone on auto and two Aviator bets a round (see model.test.ts). */
@@ -41,20 +42,23 @@ type Verdict = 'early' | 'ontime' | 'late' | 'left';
 const VERDICT_TEXT: Record<Verdict, string> = { early: 'Too early', ontime: 'On time', late: 'Late', left: 'Prizes left over' };
 
 export default function TimerApp() {
-  const [day, setDay] = useState<number | 'custom'>(7);
-  const [missions, setMissions] = useState<SimMission[]>(simMissionsForDay(7));
-  const [prizes, setPrizes] = useState(50);
   const [target, setTarget] = useState('23:00');
   const [tol, setTol] = useState(30);
+  const [prizes, setPrizes] = useState(50);
   const [bets, setBets] = useState<1 | 2>(2);
   const [clock, setClock] = useState<AviatorClock>(DEFAULT_CLOCK);
+  const startMin = toMin(START);
+  const targetMin = toMin(target) - startMin;
+
+  const [missions, setMissions] = useState<SimMission[]>(() => suggestedSet(toMin('23:00') - toMin(START), GAMES, FITTED_SPEED, DEFAULT_CLOCK, 2));
+  const [source, setSource] = useState('Suggested for 23:00');
   const [result, setResult] = useState<TimerResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [suggestion, setSuggestion] = useState<Suggestion | null | 'none'>(null);
+  const [showBefore, setShowBefore] = useState(false);
   const [backtest, setBacktest] = useState<{ day: number; reported: number; r: TimerResult }[]>([]);
+  const beforeRef = useRef<HTMLElement>(null);
 
-  const startMin = toMin(START);
-  const targetMin = toMin(target) - startMin;
   const settings: TimerSettings = useMemo(
     () => ({ players: Math.max(AUTO_PLAYERS, prizes), prizes, windowMin: WINDOW_MIN, betsPerRound: bets, clock, speed: FITTED_SPEED, spread: 0, runs: 300, seed: 7 }),
     [prizes, bets, clock],
@@ -71,26 +75,40 @@ export default function TimerApp() {
   }, [missions, settings]);
 
   useEffect(() => {
+    if (!showBefore) return;
     const t = setTimeout(() => {
-      setBacktest(
-        FIT_DAYS.map((d) => ({
-          day: d.day,
-          reported: d.reportedMin,
-          r: simulateDay(d.missions, GAMES, { ...settings, players: d.players, prizes: 50, runs: 200, seed: 21 }),
-        })),
-      );
-    }, 400);
+      setBacktest(FIT_DAYS.map((d) => ({ day: d.day, reported: d.reportedMin, r: simulateDay(d.missions, GAMES, { ...settings, players: d.players, prizes: 50, runs: 200, seed: 21 }) })));
+    }, 50);
     return () => clearTimeout(t);
-  }, [settings]);
+  }, [settings, showBefore]);
 
-  const pickDay = (d: number) => {
-    setDay(d);
-    setMissions(simMissionsForDay(d));
-    setPrizes(50);
+  const setTasks = (ms: SimMission[], label: string) => {
+    setMissions(ms);
+    setSource(label);
   };
-  const edit = (i: number, patch: Partial<SimMission>) => {
-    setDay('custom');
-    setMissions(missions.map((m, j) => (j === i ? { ...m, ...patch } : m)));
+  const edit = (i: number, patch: Partial<SimMission>) => setTasks(missions.map((m, j) => (j === i ? { ...m, ...patch } : m)), 'Your tasks');
+
+  const suggest = () => {
+    setBusy(true);
+    setTimeout(() => {
+      // Size the set, then fine-tune the Aviator count so the typical day lands on the target.
+      const base = suggestedSet(targetMin, GAMES, FITTED_SPEED, clock, bets);
+      const tuned = suggestTarget(base, GAMES, settings, targetMin, 0);
+      setTasks(tuned ? base.map((m, i) => (i === 0 ? { ...m, target: tuned.to } : m)) : base, `Suggested for ${target}`);
+    }, 30);
+  };
+  const random = () => {
+    const seed = Math.floor(Math.random() * 1e9);
+    setTasks(randomSet(seed, GAMES), 'Random set');
+  };
+  const openBefore = () => {
+    setShowBefore(true);
+    setTimeout(() => beforeRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+  };
+  const loadDay = (d: number) => {
+    setTasks(simMissionsForDay(d), `Day ${d} of the 5–11 Oct challenge`);
+    setPrizes(50);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   let verdict: Verdict | null = null;
@@ -133,83 +151,47 @@ export default function TimerApp() {
             Last Prize <b>Timer</b>
           </span>
           <nav className="t-nav" aria-label="Sections">
-            <a href="#day">The day</a>
-            <a href="#aviator">Aviator clock</a>
-            <a href="#check">Check vs real days</a>
-            <a href="#games">Other games</a>
+            <a href="#calc">Calculator</a>
+            <a href="#how">How it works</a>
+            <a href="#before" onClick={openBefore}>
+              What was before
+            </a>
           </nav>
         </div>
       </header>
 
       <main className="t-wrap t-main">
-        <section className="t-hero">
-          <p className="t-eyebrow">Daily window 19:00–23:59 UTC · {prizes} prizes</p>
-          <h1>Will the last prize go at the right time?</h1>
-          <div className={`t-verdict ${verdict ?? ''}`} aria-live="polite">
-            <div className="t-verdict-main">
-              <span className="t-chip">{busy && !result ? 'Working…' : verdict ? VERDICT_TEXT[verdict] : '—'}</span>
-              <p className="t-big">
-                {!result ? '—' : verdict === 'left' ? `${Math.round(avgWinners)} of ${prizes} won` : clockAt(startMin, result.median)}
-                <small>{verdict === 'left' ? 'by 23:59 on a typical day' : 'last prize, typical day (UTC)'}</small>
-              </p>
-              <p className="t-sub">
-                {result && verdict !== 'left' && (
-                  <>
-                    8 days in 10 between <b>{clockAt(startMin, result.p10)}</b> and <b>{Number.isFinite(result.p90) ? clockAt(startMin, result.p90) : 'the close with prizes left'}</b>. Your target is{' '}
-                    <b>
-                      {target} ± {tol} min
-                    </b>
-                    {verdict === 'early' && `: about ${dur(targetMin - result.median)} too early.`}
-                    {verdict === 'late' && `: about ${dur(result.median - targetMin)} late.`}
-                    {verdict === 'ontime' && '.'}
-                  </>
-                )}
-                {result && verdict === 'left' && <>A task is too hard to finish in the window. Look at the slowest task below.</>}
-              </p>
-            </div>
-            <dl className="t-facts">
-              <div>
-                <dt>Lands in your target window</dt>
-                <dd>{result ? `${Math.round(inBand * 100)}%` : '—'}</dd>
-              </div>
-              <div>
-                <dt>All {prizes} prizes go by 23:59</dt>
-                <dd>{result ? `${Math.round(result.pAllGone * 100)}%` : '—'}</dd>
-              </div>
-              <div>
-                <dt>Decided by</dt>
-                <dd className="sm">{slow ? describe(slow) : '—'}</dd>
-              </div>
-            </dl>
+        <section id="calc" className="t-calc">
+          <div className="t-calc-head">
+            <h1>Will the last prize go at the right time?</h1>
+            <p className="t-muted">Set the tasks and the time you want the last prize to go. Window 19:00–23:59 UTC, everyone playing every game at once on auto.</p>
           </div>
-        </section>
 
-        <section id="day" className="t-section">
-          <div className="t-head">
-            <h2>The day</h2>
-            <p className="t-muted">Start from a day of the 5–11 Oct campaign or change the tasks. Players run every game at the same time on auto, so everyone moves at the same pace and the number of players does not change the result.</p>
-          </div>
-          <div className="t-days" role="group" aria-label="Start from a day">
-            {DAY_RESULTS.map((r) => (
-              <button key={r.day} id={`day-${r.day}`} aria-pressed={day === r.day} onClick={() => pickDay(r.day)}>
-                Day {r.day}
-                <small>{r.winners === 0 ? '0 winners' : `real: ${clockAt(startMin, r.durationMin)}`}</small>
-              </button>
-            ))}
-            <button aria-pressed={day === 'custom'} onClick={() => setDay('custom')}>
-              My own
-              <small>edit below</small>
+          <div className="t-toolbar" role="toolbar" aria-label="Task sets">
+            <button id="suggest" className="t-btn primary" onClick={suggest} disabled={busy}>
+              Suggested for {target}
+            </button>
+            <button id="random" className="t-btn" onClick={random} disabled={busy}>
+              Random
+            </button>
+            <button id="add-task" className="t-btn" onClick={() => setTasks([...missions, { game: 'mines', kind: 'bets', target: 100 }], 'Your tasks')}>
+              + Add task
+            </button>
+            <button id="clear" className="t-btn ghost" onClick={() => setTasks([], 'Empty')}>
+              Clear
+            </button>
+            <button id="see-before" className="t-btn ghost t-push" aria-expanded={showBefore} onClick={() => (showBefore ? setShowBefore(false) : openBefore())}>
+              {showBefore ? 'Hide what was before' : 'See what was before'}
             </button>
           </div>
 
-          <div className="t-setup">
+          <div className="t-calc-grid">
             <div className="t-card">
               <div className="t-row-between">
                 <h3>Tasks</h3>
-                <button id="add-task" className="t-btn" onClick={() => (setDay('custom'), setMissions([...missions, { game: 'mines', kind: 'bets', target: 100 }]))}>
-                  + Add task
-                </button>
+                <span className="t-source">{source}</span>
               </div>
+              {missions.length === 0 && <p className="t-muted">No tasks yet. Press Suggested, Random or + Add task.</p>}
               <div className="t-tasks">
                 {missions.map((m, i) => {
                   const g = GAMES[m.game];
@@ -243,47 +225,77 @@ export default function TimerApp() {
                         <input id={`n-${i}`} type="number" min={1} value={m.target} onChange={(e) => edit(i, { target: Math.max(1, Number(e.target.value) || 1) })} />
                       </label>
                       {p != null && <span className={`t-odds ${p >= 0.03 ? 'ok' : p >= 0.005 ? 'mid' : 'bad'}`}>{p > 0 ? `${oneIn(p)} bets` : 'impossible'}</span>}
-                      <button className="t-x" aria-label={`Remove ${describe(m)}`} onClick={() => (setDay('custom'), setMissions(missions.filter((_, j) => j !== i)))}>
+                      <button className="t-x" aria-label={`Remove ${describe(m)}`} onClick={() => setTasks(missions.filter((_, j) => j !== i), 'Your tasks')}>
                         ×
                       </button>
                     </div>
                   );
                 })}
               </div>
+              <div className="t-settings-row">
+                <label>
+                  <span>Last prize wanted at (UTC)</span>
+                  <span className="t-pair">
+                    <input id="target" type="time" value={target} min="19:00" max="23:59" onChange={(e) => setTarget(e.target.value || '23:00')} />
+                    <span className="t-muted">±</span>
+                    <input id="tol" type="number" min={5} max={120} step={5} value={tol} onChange={(e) => setTol(Math.max(5, Number(e.target.value) || 30))} />
+                    <span className="t-muted">min</span>
+                  </span>
+                </label>
+                <label>
+                  <span>Prizes</span>
+                  <input id="prizes" type="number" min={1} value={prizes} onChange={(e) => setPrizes(Math.max(1, Number(e.target.value) || 1))} />
+                </label>
+                <fieldset>
+                  <legend>Aviator bets a round</legend>
+                  <div className="t-seg">
+                    {([1, 2] as const).map((b) => (
+                      <button key={b} id={`bets-${b}`} aria-pressed={bets === b} onClick={() => setBets(b)}>
+                        {b}
+                      </button>
+                    ))}
+                  </div>
+                </fieldset>
+              </div>
             </div>
-            <div className="t-card t-settings">
-              <h3>Settings</h3>
-              <label>
-                <span>I want the last prize at (UTC)</span>
-                <span className="t-pair">
-                  <input id="target" type="time" value={target} min="19:00" max="23:59" onChange={(e) => setTarget(e.target.value || '23:00')} />
-                  <span className="t-muted">±</span>
-                  <input id="tol" type="number" min={5} max={120} step={5} value={tol} onChange={(e) => setTol(Math.max(5, Number(e.target.value) || 30))} />
-                  <span className="t-muted">min</span>
-                </span>
-              </label>
-              <label>
-                <span>Prizes</span>
-                <input id="prizes" type="number" min={1} value={prizes} onChange={(e) => setPrizes(Math.max(1, Number(e.target.value) || 1))} />
-              </label>
-              <fieldset>
-                <legend>Aviator bets per round</legend>
-                <div className="t-seg">
-                  {([1, 2] as const).map((b) => (
-                    <button key={b} id={`bets-${b}`} aria-pressed={bets === b} onClick={() => setBets(b)}>
-                      {b === 1 ? '1 bet' : '2 bets (real days)'}
-                    </button>
-                  ))}
+
+            <aside className={`t-verdict ${verdict ?? ''}`} aria-live="polite">
+              <span className="t-chip">{busy ? 'Calculating…' : verdict ? VERDICT_TEXT[verdict] : 'Add tasks'}</span>
+              <p className="t-big">{!result ? '—' : verdict === 'left' ? `${Math.round(avgWinners)}/${prizes}` : clockAt(startMin, result.median)}</p>
+              <p className="t-big-cap">{verdict === 'left' ? 'prizes won by 23:59, typical day' : 'last prize goes, typical day (UTC)'}</p>
+              <p className="t-sub">
+                {result && verdict !== 'left' && (
+                  <>
+                    8 days in 10: <b>{clockAt(startMin, result.p10)}</b> – <b>{Number.isFinite(result.p90) ? clockAt(startMin, result.p90) : 'after close'}</b>.{' '}
+                    {verdict === 'early' && `About ${dur(targetMin - result.median)} before ${target}.`}
+                    {verdict === 'late' && `About ${dur(result.median - targetMin)} after ${target}.`}
+                    {verdict === 'ontime' && `Within ${tol} min of ${target}.`}
+                  </>
+                )}
+                {result && verdict === 'left' && 'A task is too hard to finish in the window.'}
+              </p>
+              <dl className="t-facts">
+                <div>
+                  <dt>Lands within ±{tol} min</dt>
+                  <dd>{result ? `${Math.round(inBand * 100)}%` : '—'}</dd>
                 </div>
-              </fieldset>
-            </div>
+                <div>
+                  <dt>All prizes go by 23:59</dt>
+                  <dd>{result ? `${Math.round(result.pAllGone * 100)}%` : '—'}</dd>
+                </div>
+                <div className="wide">
+                  <dt>Decided by</dt>
+                  <dd className="sm">{slow ? describe(slow) : '—'}</dd>
+                </div>
+              </dl>
+            </aside>
           </div>
 
           {result && (
             <div className="t-card">
               <div className="t-row-between">
                 <h3>Chance the last prize has gone, by time</h3>
-                <span className="t-muted t-small">{busy ? 'Updating…' : '300 simulated days'}</span>
+                <span className="t-muted t-small">300 simulated days</span>
               </div>
               <GoneChart result={result} startMin={startMin} targetMin={targetMin} tol={tol} />
               <h3>When the {prizes}th player finishes each task</h3>
@@ -292,16 +304,18 @@ export default function TimerApp() {
                 <p>
                   {slow && (
                     <>
-                      <b>{describe(slow)}</b> decides the time on most simulated days.
+                      <b>{describe(slow)}</b> decides the time on most simulated days.{' '}
                     </>
-                  )}{' '}
-                  {GAMES[slow?.game ?? 'aviator'].shared && slow
-                    ? 'Aviator rounds are shared, so everyone who bets every round finishes this task at the same moment: the time depends on when the 30× rounds come, not on how many people play.'
-                    : ''}
+                  )}
+                  {slow && GAMES[slow.game].shared
+                    ? 'Aviator rounds are shared, so everyone on auto finishes this task at the same moment: the time depends on when the big rounds come.'
+                    : slow
+                      ? 'This is a luck task in a game where each player gets their own results, so it swings more from day to day than an Aviator task.'
+                      : ''}
                 </p>
-                {suggestion === null && (
+                {suggestion === null && verdict !== 'ontime' && (
                   <button id="find-fix" className="t-btn primary" onClick={findFix} disabled={busy}>
-                    Find the number that lands on {target}
+                    Fix it: find the number that lands on {target}
                   </button>
                 )}
                 {suggestion === 'none' && <p className="t-muted">The current number is already the closest to {target}.</p>}
@@ -321,12 +335,125 @@ export default function TimerApp() {
           )}
         </section>
 
-        <section id="aviator" className="t-section">
+        {showBefore && (
+          <section id="before" ref={beforeRef} className="t-section t-before">
+            <div className="t-row-between">
+              <div className="t-head">
+                <p className="t-eyebrow">For perspective</p>
+                <h2>What was before: the 5–11 Oct challenge</h2>
+                <p className="t-muted">SportyBet daily missions, 50 prizes a day. Load any day into the calculator, and see how the calculator does against what really happened.</p>
+              </div>
+              <button id="close-before" className="t-btn ghost" onClick={() => setShowBefore(false)}>
+                Close
+              </button>
+            </div>
+            <div className="t-daycards">
+              {DAY_RESULTS.map((r) => (
+                <div className={`t-daycard ${r.winners === 0 ? 'bad' : ''}`} key={r.day}>
+                  <div className="t-row-between">
+                    <b>Day {r.day}</b>
+                    <span className="t-mono">{r.winners === 0 ? '0 winners' : `last prize ${clockAt(startMin, r.durationMin)}`}</span>
+                  </div>
+                  <ul>
+                    {simMissionsForDay(r.day).map((m, i) => (
+                      <li key={i}>{describe(m)}</li>
+                    ))}
+                  </ul>
+                  <button id={`load-day-${r.day}`} className="t-btn" onClick={() => loadDay(r.day)}>
+                    Load into calculator
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="t-card">
+              <h3>Calculator vs real last-prize times</h3>
+              {!backtest.length ? (
+                <p className="t-muted">Simulating the six days…</p>
+              ) : (
+                <div className="t-bt">
+                  {backtest.map((b) => {
+                    const inside = b.reported >= b.r.p10 && b.reported <= b.r.p90;
+                    return (
+                      <div className="t-bt-row" key={b.day}>
+                        <span className="t-bt-day">Day {b.day}</span>
+                        <div className="t-track" aria-label={`Day ${b.day}: real ${clockAt(startMin, b.reported)}, model ${clockAt(startMin, b.r.p10)} to ${clockAt(startMin, b.r.p90)}`}>
+                          <i className="range" style={{ left: `${pos(b.r.p10)}%`, width: `${Math.max(0.8, pos(b.r.p90) - pos(b.r.p10))}%` }} />
+                          <i className="med" style={{ left: `${pos(b.r.median)}%` }} />
+                          <i className="real" style={{ left: `${pos(b.reported)}%` }} />
+                        </div>
+                        <span className={`t-bt-txt ${inside ? '' : 'off'}`}>
+                          real {clockAt(startMin, b.reported)} · calc {clockAt(startMin, b.r.median)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                  <div className="t-axis" aria-hidden="true">
+                    {[0, 60, 120, 180, 240, 299].map((m) => (
+                      <span key={m} style={{ left: `${pos(m)}%` }}>
+                        {clockAt(startMin, m)}
+                      </span>
+                    ))}
+                  </div>
+                  <p className="t-legend t-small">
+                    <span className="lg range" /> calculator, 8 days in 10 <span className="lg med" /> calculator typical <span className="lg real" /> real last prize
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="t-card">
+              <h3>What the challenge taught the calculator</h3>
+              <ul className="t-learn">
+                <li>
+                  <b>Prizes went too early on 5 of 7 days</b> (49 min to 2h 08m into a 5-hour window). Day 7 (22:39) was the only one near the end.
+                </li>
+                <li>
+                  <b>Day 6 had no winners:</b> Keno pays 30× or more about once in 1,496 bets, so 20 of them needs about 30,000 bets.
+                </li>
+                <li>
+                  <b>Players used both Aviator bet slots.</b> With one bet a round, Days 2, 5 and 7 are close to impossible:
+                </li>
+              </ul>
+              <div className="t-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Day</th>
+                      <th>Aviator task</th>
+                      <th>Last prize after</th>
+                      <th>Chance with 1 bet</th>
+                      <th>With 2 bets</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {aviatorDays.map((d) => (
+                      <tr key={d.day}>
+                        <td>{d.day}</td>
+                        <td>{d.text.replace('Aviator: ', '')}</td>
+                        <td>{dur(d.reported)}</td>
+                        <td className={d.one < 0.05 ? 'bad' : ''}>{pctText(d.one)}</td>
+                        <td className={d.two < 0.05 ? 'bad' : ''}>{pctText(d.two)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="t-muted t-small">
+                The one number fitted to these days is the auto pace of the non-Aviator games ({FITTED_SPEED}× our starting guess). Everything else comes from the Aviator clock
+                and Spribe’s paytables.
+              </p>
+            </div>
+          </section>
+        )}
+
+        <section id="how" className="t-section">
           <div className="t-head">
+            <p className="t-eyebrow">How it works</p>
             <h2>The Aviator clock</h2>
             <p className="t-muted">
-              Spribe does not publish round timing, so we built it from public measurements. A round is a betting countdown, a flight that grows the multiplier
-              exponentially, and a short pause. With a 97% RTP the average flight works out to exactly 0.97 ÷ growth rate.
+              Spribe does not publish round timing, so we built it from public measurements: a betting countdown, a flight where the multiplier grows exponentially, and a
+              short pause. With a 97% RTP the average flight is exactly 0.97 ÷ growth rate.
             </p>
           </div>
           <div className="t-tiles">
@@ -357,35 +484,18 @@ export default function TimerApp() {
           </div>
           <div className="t-split">
             <div className="t-card">
-              <h3>Players used both bet slots</h3>
-              <p className="t-muted t-small">
-                Chance the Aviator task was done by the time the last prize went. With one bet per round, Days 2, 5 and 7 are close to impossible; with two bets
-                (each counting) all days fit. The model uses two.
-              </p>
-              <div className="t-scroll">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Day</th>
-                      <th>Aviator task</th>
-                      <th>Last prize</th>
-                      <th>1 bet</th>
-                      <th>2 bets</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {aviatorDays.map((d) => (
-                      <tr key={d.day}>
-                        <td>{d.day}</td>
-                        <td>{d.text.replace('Aviator: ', '')}</td>
-                        <td>{dur(d.reported)}</td>
-                        <td className={d.one < 0.05 ? 'bad' : ''}>{pctText(d.one)}</td>
-                        <td className={d.two < 0.05 ? 'bad' : ''}>{pctText(d.two)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <h3>Sources</h3>
+              <ul className="t-sources">
+                {AVIATOR_SOURCES.map((s) => (
+                  <li key={s.url}>
+                    <a href={s.url} target="_blank" rel="noreferrer">
+                      {s.label}
+                    </a>
+                  </li>
+                ))}
+                <li>Other guides quote anywhere from 60 to 360 rounds an hour; these are the ones that state their method.</li>
+              </ul>
+              <p className="t-muted t-small">Best data: our own round log for football.com (crash point and time per round). With it the clock is exact instead of modelled.</p>
             </div>
             <div className="t-card t-settings">
               <h3>Clock settings</h3>
@@ -411,70 +521,11 @@ export default function TimerApp() {
               <button id="reset-clock" className="t-btn" onClick={() => setClock(DEFAULT_CLOCK)}>
                 Reset to research values
               </button>
-              <p className="t-muted t-small">
-                Best data: our own round log for football.com (crash point and timestamp per round). With it the clock is exact instead of modelled.
-              </p>
             </div>
           </div>
-          <ul className="t-sources">
-            {AVIATOR_SOURCES.map((s) => (
-              <li key={s.url}>
-                <a href={s.url} target="_blank" rel="noreferrer">
-                  {s.label}
-                </a>
-              </li>
-            ))}
-            <li>Other guides quote anywhere from 60 to 360 rounds an hour; the figures above are the ones that state their method.</li>
-          </ul>
-        </section>
 
-        <section id="check" className="t-section">
           <div className="t-head">
-            <h2>Check against the real days</h2>
-            <p className="t-muted">
-              The auto pace of the other games is the one setting we fit: one number for all days ({FITTED_SPEED}× our starting guess, for example Plinko {+(SIM_GAMES.find((g) => g.id === 'plinko')!.betsPerMin * FITTED_SPEED).toFixed(1)} bets a minute). Everything else comes from the clock
-              and the paytables.
-            </p>
-          </div>
-          <div className="t-card">
-            {!backtest.length ? (
-              <p className="t-muted">Simulating the six days…</p>
-            ) : (
-              <div className="t-bt">
-                {backtest.map((b) => {
-                  const inside = b.reported >= b.r.p10 && b.reported <= b.r.p90;
-                  return (
-                    <div className="t-bt-row" key={b.day}>
-                      <span className="t-bt-day">Day {b.day}</span>
-                      <div className="t-track" aria-label={`Day ${b.day}: real ${clockAt(startMin, b.reported)}, model ${clockAt(startMin, b.r.p10)} to ${clockAt(startMin, b.r.p90)}`}>
-                        <i className="range" style={{ left: `${pos(b.r.p10)}%`, width: `${Math.max(0.8, pos(b.r.p90) - pos(b.r.p10))}%` }} />
-                        <i className="med" style={{ left: `${pos(b.r.median)}%` }} />
-                        <i className="real" style={{ left: `${pos(b.reported)}%` }} />
-                      </div>
-                      <span className={`t-bt-txt ${inside ? '' : 'off'}`}>
-                        real {clockAt(startMin, b.reported)} · model {clockAt(startMin, b.r.median)}
-                      </span>
-                    </div>
-                  );
-                })}
-                <div className="t-axis" aria-hidden="true">
-                  {[0, 60, 120, 180, 240, 299].map((m) => (
-                    <span key={m} style={{ left: `${pos(m)}%` }}>
-                      {clockAt(startMin, m)}
-                    </span>
-                  ))}
-                </div>
-                <p className="t-legend t-small">
-                  <span className="lg range" /> model, 8 days in 10 <span className="lg med" /> model typical <span className="lg real" /> real last prize
-                </p>
-              </div>
-            )}
-          </div>
-        </section>
-
-        <section id="games" className="t-section">
-          <div className="t-head">
-            <h2>Other games: what a task costs</h2>
+            <h2>The other games</h2>
             <p className="t-muted">Chance per bet of a result at or above each multiplier, from Spribe’s published paytables and rules, using the best setting for the player.</p>
           </div>
           <div className="t-card t-scroll">
@@ -487,7 +538,7 @@ export default function TimerApp() {
                   {THRESHOLDS.map((x) => (
                     <th key={x}>{x}×+</th>
                   ))}
-                  <th>Pace used</th>
+                  <th>Auto pace</th>
                   <th>Source</th>
                 </tr>
               </thead>
@@ -507,7 +558,7 @@ export default function TimerApp() {
                         </td>
                       );
                     })}
-                    <td>{g.shared ? `${Math.round(roundsPerHour(clock) / 60 * 10) / 10} rounds/min` : `${+(g.betsPerMin * FITTED_SPEED).toFixed(1)} bets/min`}</td>
+                    <td>{g.shared ? `${+(roundsPerHour(clock) / 60).toFixed(1)} rounds/min` : `${+(g.betsPerMin * FITTED_SPEED).toFixed(1)} bets/min`}</td>
                     <td>
                       {g.sources.slice(0, 1).map((s) => (
                         <a key={s.url} href={s.url} target="_blank" rel="noreferrer">
@@ -521,8 +572,8 @@ export default function TimerApp() {
             </table>
           </div>
           <p className="t-muted t-small">
-            Keno and Plinko: exact from the paytable. Mines and Goal: exact from the grid rules (Goal tops out at 9.03×). Trader and Pilot Chicken: crash maths (97% ÷ X),
-            an estimate. Keno 80: no full paytable found, so its numbers are a best case. Hover a cell for the setting.
+            Keno and Plinko: exact from the paytable. Mines and Goal: exact from the grid rules (Goal tops out at 9.03×). Trader and Pilot Chicken: crash maths (97% ÷ X), an
+            estimate. Keno 80: no full paytable found, so its numbers are a best case. Auto paces are not published; ask product for the real seconds per auto round.
           </p>
         </section>
       </main>
@@ -540,7 +591,7 @@ function pctText(p: number): string {
 
 function GoneChart({ result, startMin, targetMin, tol }: { result: TimerResult; startMin: number; targetMin: number; tol: number }) {
   const W = 720;
-  const H = 230;
+  const H = 220;
   const m = { l: 44, r: 14, t: 12, b: 30 };
   const x = (t: number) => m.l + (Math.min(Math.max(t, 0), WINDOW_MIN) / WINDOW_MIN) * (W - m.l - m.r);
   const y = (p: number) => m.t + (1 - p) * (H - m.t - m.b);
@@ -574,8 +625,8 @@ function GoneChart({ result, startMin, targetMin, tol }: { result: TimerResult; 
             </text>
           </g>
         )}
-        <text x={x(targetMin)} y={m.t + 14} textAnchor="middle" className="band-lbl">
-          target
+        <text x={x(targetMin)} y={H - m.b - 6} textAnchor="middle" className="band-lbl">
+          your target
         </text>
       </svg>
     </div>

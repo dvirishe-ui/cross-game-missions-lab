@@ -79,15 +79,22 @@ function lognormal(rng: Rng, sigma: number): number {
   return Math.exp(sigma * z - (sigma * sigma) / 2);
 }
 
+/** Bets to get k successes; a normal approximation once k is large (same mean and spread, much faster). */
+function attempts(k: number, p: number, rng: Rng): number {
+  if (k <= 40) return sampleNegBinomAttempts(k, p, rng);
+  const z = Math.sqrt(-2 * Math.log(Math.max(1e-12, rng()))) * Math.cos(2 * Math.PI * rng());
+  return Math.max(k, k / p + z * Math.sqrt(k * (1 - p)) / p);
+}
+
 function soloTime(m: SimMission, g: SimGame, rate: number, rng: Rng): number {
   if (rate <= 0) return Infinity;
   if (m.kind === 'bets') return m.target / rate;
   if (m.kind === 'catch') {
     const p = missionChance(m, g);
-    return p <= 0 ? Infinity : sampleNegBinomAttempts(m.target, p, rng) / rate;
+    return p <= 0 ? Infinity : attempts(m.target, p, rng) / rate;
   }
   const c = chanceAtLeast(g, COLLECT_AIM);
-  return c.p <= 0 ? Infinity : sampleNegBinomAttempts(Math.ceil(m.target / c.pays), c.p, rng) / rate;
+  return c.p <= 0 ? Infinity : attempts(Math.ceil(m.target / c.pays), c.p, rng) / rate;
 }
 
 export function runDay(missions: SimMission[], games: Record<string, SimGame>, s: TimerSettings, rng: Rng, horizon = s.windowMin): TimerRun {
@@ -233,12 +240,13 @@ export interface Suggestion {
 export function suggestTarget(missions: SimMission[], games: Record<string, SimGame>, s: TimerSettings, targetMin: number, mission: number): Suggestion | null {
   const m = missions[mission];
   if (!m) return null;
-  const quick = { ...s, runs: Math.min(s.runs, 120) };
+  const quick = { ...s, runs: Math.min(s.runs, 100) };
   const at = (n: number) => simulateDay(missions.map((x, i) => (i === mission ? { ...x, target: n } : x)), games, quick);
   const key = (r: TimerResult) => (r.pAllGone < 0.5 ? Infinity : r.median);
-  // Bigger targets take longer; binary search on the median.
-  let lo = 1;
-  let hi = Math.max(2, m.target);
+  // Bigger targets take longer; binary search on the median, starting near the current number.
+  let lo = Math.max(1, Math.floor(m.target / 2));
+  let hi = Math.max(lo + 1, Math.ceil(m.target * 1.5));
+  while (lo > 1 && key(at(lo)) > targetMin) lo = Math.max(1, Math.floor(lo / 2));
   while (key(at(hi)) < targetMin && hi < m.target * 64) hi *= 2;
   while (hi - lo > 1) {
     const mid = Math.floor((lo + hi) / 2);
