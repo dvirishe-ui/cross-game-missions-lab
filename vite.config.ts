@@ -10,6 +10,7 @@ export default defineConfig({
         simulator: resolve(import.meta.dirname, 'index.html'),
         brief: resolve(import.meta.dirname, 'brief.html'),
         retention: resolve(import.meta.dirname, 'retention.html'),
+        timer: resolve(import.meta.dirname, 'last-prize.html'),
       },
     },
   },
