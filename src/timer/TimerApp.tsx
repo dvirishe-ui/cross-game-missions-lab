@@ -31,12 +31,20 @@ function dur(m: number): string {
   const r = Math.round(m);
   return r < 60 ? `${r}m` : `${Math.floor(r / 60)}h ${String(r % 60).padStart(2, '0')}m`;
 }
+/** Empty input → NaN, so a cleared field stays empty instead of jumping back to 1. */
+const num = (v: string) => (v.trim() === '' ? NaN : Number(v));
+const show = (v: number | undefined) => (v != null && Number.isFinite(v) ? v : '');
+const filled = (v: number | undefined) => v != null && Number.isFinite(v) && v >= 1;
+const q = (v: number | undefined) => (filled(v) ? v : '?');
+
 function describe(m: SimMission): string {
   const n = GAMES[m.game].name;
-  if (m.kind === 'catch') return `${n}: catch ${m.threshold}× or more ${m.target} times`;
-  if (m.kind === 'collect') return `${n}: collect ${m.target}× in total`;
-  return `${n}: place ${m.target} bets`;
+  if (m.kind === 'catch') return `${n}: catch ${q(m.threshold)}× or more ${q(m.target)} times`;
+  if (m.kind === 'collect') return `${n}: collect ${q(m.target)}× in total`;
+  return `${n}: place ${q(m.target)} bets`;
 }
+
+const taskReady = (m: SimMission) => filled(m.target) && (m.kind !== 'catch' || filled(m.threshold));
 
 type Verdict = 'early' | 'ontime' | 'late' | 'left';
 const VERDICT_TEXT: Record<Verdict, string> = { early: 'Too early', ontime: 'On time', late: 'Late', left: 'Prizes left over' };
@@ -59,8 +67,9 @@ export default function TimerApp() {
   const [backtest, setBacktest] = useState<{ day: number; reported: number; r: TimerResult }[]>([]);
   const beforeRef = useRef<HTMLElement>(null);
 
+  const ready = missions.length > 0 && missions.every(taskReady) && filled(prizes) && Number.isFinite(tol);
   const settings: TimerSettings = useMemo(
-    () => ({ players: Math.max(AUTO_PLAYERS, prizes), prizes, windowMin: WINDOW_MIN, betsPerRound: bets, clock, speed: FITTED_SPEED, spread: 0, runs: 300, seed: 7 }),
+    () => ({ players: Math.max(AUTO_PLAYERS, filled(prizes) ? prizes : 0), prizes, windowMin: WINDOW_MIN, betsPerRound: bets, clock, speed: FITTED_SPEED, spread: 0, runs: 300, seed: 7 }),
     [prizes, bets, clock],
   );
 
@@ -68,11 +77,11 @@ export default function TimerApp() {
     setBusy(true);
     setSuggestion(null);
     const t = setTimeout(() => {
-      setResult(missions.length ? simulateDay(missions, GAMES, settings) : null);
+      setResult(ready ? simulateDay(missions, GAMES, settings) : null);
       setBusy(false);
     }, 60);
     return () => clearTimeout(t);
-  }, [missions, settings]);
+  }, [missions, settings, ready]);
 
   useEffect(() => {
     if (!showBefore) return;
@@ -112,7 +121,7 @@ export default function TimerApp() {
   };
 
   let verdict: Verdict | null = null;
-  if (result) {
+  if (ready && result) {
     if (result.pAllGone < 0.5) verdict = 'left';
     else if (result.median < targetMin - tol) verdict = 'early';
     else if (result.median > targetMin + tol) verdict = 'late';
@@ -178,7 +187,7 @@ export default function TimerApp() {
               + Add task
             </button>
             <button id="clear" className="t-btn ghost" onClick={() => setTasks([], 'Empty')}>
-              Clear
+              Delete all
             </button>
             <button id="see-before" className="t-btn ghost t-push" aria-expanded={showBefore} onClick={() => (showBefore ? setShowBefore(false) : openBefore())}>
               {showBefore ? 'Hide what was before' : 'See what was before'}
@@ -195,7 +204,7 @@ export default function TimerApp() {
               <div className="t-tasks">
                 {missions.map((m, i) => {
                   const g = GAMES[m.game];
-                  const p = m.kind === 'catch' ? missionChance(m, g) : null;
+                  const p = m.kind === 'catch' && filled(m.threshold) ? missionChance(m, g) : null;
                   return (
                     <div className="t-task" key={i}>
                       <select id={`game-${i}`} aria-label="Game" value={m.game} onChange={(e) => edit(i, { game: e.target.value as GameId })}>
@@ -217,12 +226,12 @@ export default function TimerApp() {
                       </select>
                       {m.kind === 'catch' && (
                         <label className="t-inline">
-                          <input id={`x-${i}`} type="number" min={1} value={m.threshold ?? ''} onChange={(e) => edit(i, { threshold: Number(e.target.value) || 1 })} />×
+                          <input id={`x-${i}`} type="number" min={1} value={show(m.threshold)} onChange={(e) => edit(i, { threshold: num(e.target.value) })} />×
                         </label>
                       )}
                       <label className="t-inline">
                         {m.kind === 'catch' ? 'times' : m.kind === 'collect' ? 'total ×' : 'bets'}
-                        <input id={`n-${i}`} type="number" min={1} value={m.target} onChange={(e) => edit(i, { target: Math.max(1, Number(e.target.value) || 1) })} />
+                        <input id={`n-${i}`} type="number" min={1} value={show(m.target)} onChange={(e) => edit(i, { target: num(e.target.value) })} />
                       </label>
                       {p != null && <span className={`t-odds ${p >= 0.03 ? 'ok' : p >= 0.005 ? 'mid' : 'bad'}`}>{p > 0 ? `${oneIn(p)} bets` : 'impossible'}</span>}
                       <button className="t-x" aria-label={`Remove ${describe(m)}`} onClick={() => setTasks(missions.filter((_, j) => j !== i), 'Your tasks')}>
@@ -238,13 +247,13 @@ export default function TimerApp() {
                   <span className="t-pair">
                     <input id="target" type="time" value={target} min="19:00" max="23:59" onChange={(e) => setTarget(e.target.value || '23:00')} />
                     <span className="t-muted">±</span>
-                    <input id="tol" type="number" min={5} max={120} step={5} value={tol} onChange={(e) => setTol(Math.max(5, Number(e.target.value) || 30))} />
+                    <input id="tol" type="number" min={5} max={120} step={5} value={show(tol)} onChange={(e) => setTol(num(e.target.value))} />
                     <span className="t-muted">min</span>
                   </span>
                 </label>
                 <label>
                   <span>Prizes</span>
-                  <input id="prizes" type="number" min={1} value={prizes} onChange={(e) => setPrizes(Math.max(1, Number(e.target.value) || 1))} />
+                  <input id="prizes" type="number" min={1} value={show(prizes)} onChange={(e) => setPrizes(num(e.target.value))} />
                 </label>
                 <fieldset>
                   <legend>Aviator bets a round</legend>
@@ -260,38 +269,45 @@ export default function TimerApp() {
             </div>
 
             <aside className={`t-verdict ${verdict ?? ''}`} aria-live="polite">
-              <span className="t-chip">{busy ? 'Calculating…' : verdict ? VERDICT_TEXT[verdict] : 'Add tasks'}</span>
-              <p className="t-big">{!result ? '—' : verdict === 'left' ? `${Math.round(avgWinners)}/${prizes}` : clockAt(startMin, result.median)}</p>
-              <p className="t-big-cap">{verdict === 'left' ? 'prizes won by 23:59, typical day' : 'last prize goes, typical day (UTC)'}</p>
+              <span className="t-chip">{!ready ? 'Waiting for numbers' : busy ? 'Calculating…' : verdict ? VERDICT_TEXT[verdict] : '—'}</span>
+              <p className="t-big">{!ready || !result ? '?' : verdict === 'left' ? `${Math.round(avgWinners)}/${prizes}` : clockAt(startMin, result.median)}</p>
+              <p className="t-big-cap">
+                {!ready
+                  ? missions.length
+                    ? 'Fill in every number to see when the last prize goes.'
+                    : 'Add a task, or press Suggested or Random.'
+                  : verdict === 'left'
+                    ? 'prizes won by 23:59, typical day'
+                    : 'last prize goes, typical day (UTC)'}
+              </p>
               <p className="t-sub">
-                {result && verdict !== 'left' && (
+                {ready && result && verdict !== 'left' && (
                   <>
-                    8 days in 10: <b>{clockAt(startMin, result.p10)}</b> – <b>{Number.isFinite(result.p90) ? clockAt(startMin, result.p90) : 'after close'}</b>.{' '}
                     {verdict === 'early' && `About ${dur(targetMin - result.median)} before ${target}.`}
                     {verdict === 'late' && `About ${dur(result.median - targetMin)} after ${target}.`}
                     {verdict === 'ontime' && `Within ${tol} min of ${target}.`}
                   </>
                 )}
-                {result && verdict === 'left' && 'A task is too hard to finish in the window.'}
+                {ready && result && verdict === 'left' && 'A task is too hard to finish in the window.'}
               </p>
               <dl className="t-facts">
                 <div>
                   <dt>Lands within ±{tol} min</dt>
-                  <dd>{result ? `${Math.round(inBand * 100)}%` : '—'}</dd>
+                  <dd>{ready && result ? `${Math.round(inBand * 100)}%` : '?'}</dd>
                 </div>
                 <div>
                   <dt>All prizes go by 23:59</dt>
-                  <dd>{result ? `${Math.round(result.pAllGone * 100)}%` : '—'}</dd>
+                  <dd>{ready && result ? `${Math.round(result.pAllGone * 100)}%` : '?'}</dd>
                 </div>
                 <div className="wide">
                   <dt>Decided by</dt>
-                  <dd className="sm">{slow ? describe(slow) : '—'}</dd>
+                  <dd className="sm">{ready && slow ? describe(slow) : '?'}</dd>
                 </div>
               </dl>
             </aside>
           </div>
 
-          {result && (
+          {ready && result && (
             <div className="t-card">
               <div className="t-row-between">
                 <h3>Chance the last prize has gone, by time</h3>
@@ -323,7 +339,7 @@ export default function TimerApp() {
                   <div className="t-suggest">
                     <p>
                       Change <b>{describe(missions[suggestion.mission])}</b> to <b>{suggestion.to}</b> (from {suggestion.from}): last prize about{' '}
-                      <b>{clockAt(startMin, suggestion.result.median)}</b>, 8 in 10 days {clockAt(startMin, suggestion.result.p10)}–{clockAt(startMin, suggestion.result.p90)}.
+                      <b>{clockAt(startMin, suggestion.result.median)}</b>.
                     </p>
                     <button id="apply-fix" className="t-btn primary" onClick={() => edit(suggestion.mission, { target: suggestion.to })}>
                       Use {suggestion.to}
