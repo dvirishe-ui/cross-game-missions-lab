@@ -5,11 +5,11 @@ import { gameMap, missionChance, type SimMission } from '../sim/engine';
 import { SIM_GAMES, chanceAtLeast, fmtX, oneIn } from '../sim/games';
 import { simMissionsForDay } from '../sim/days';
 import { AVIATOR_SOURCES, DEFAULT_CLOCK, chanceAtLeastHits, clockBounds, flightSec, hitsPerHour, meanRoundSec, roundsPerHour, type AviatorClock } from './clock';
-import { FIT_DAYS, playersForDay } from './days';
+import { AUTO_PLAYERS, FIT_DAYS } from './days';
 import { goneByCurve, simulateDay, suggestTarget, type Suggestion, type TimerResult, type TimerSettings } from './model';
 
-/** Pace of the non-Aviator games fitted to Days 1–5 and 7 with two Aviator bets a round (see model.test.ts). */
-export const FITTED_SPEED = 2;
+/** Auto pace of the non-Aviator games, fitted to Days 1–5 and 7 with everyone on auto and two Aviator bets a round (see model.test.ts). */
+export const FITTED_SPEED = 1.4;
 
 const GAMES = gameMap(SIM_GAMES);
 const START = '19:00';
@@ -43,7 +43,6 @@ const VERDICT_TEXT: Record<Verdict, string> = { early: 'Too early', ontime: 'On 
 export default function TimerApp() {
   const [day, setDay] = useState<number | 'custom'>(7);
   const [missions, setMissions] = useState<SimMission[]>(simMissionsForDay(7));
-  const [players, setPlayers] = useState(playersForDay(7));
   const [prizes, setPrizes] = useState(50);
   const [target, setTarget] = useState('23:00');
   const [tol, setTol] = useState(30);
@@ -57,8 +56,8 @@ export default function TimerApp() {
   const startMin = toMin(START);
   const targetMin = toMin(target) - startMin;
   const settings: TimerSettings = useMemo(
-    () => ({ players, prizes, windowMin: WINDOW_MIN, betsPerRound: bets, clock, speed: FITTED_SPEED, spread: 0.5, runs: 300, seed: 7 }),
-    [players, prizes, bets, clock],
+    () => ({ players: Math.max(AUTO_PLAYERS, prizes), prizes, windowMin: WINDOW_MIN, betsPerRound: bets, clock, speed: FITTED_SPEED, spread: 0, runs: 300, seed: 7 }),
+    [prizes, bets, clock],
   );
 
   useEffect(() => {
@@ -87,7 +86,6 @@ export default function TimerApp() {
   const pickDay = (d: number) => {
     setDay(d);
     setMissions(simMissionsForDay(d));
-    setPlayers(playersForDay(d));
     setPrizes(50);
   };
   const edit = (i: number, patch: Partial<SimMission>) => {
@@ -189,7 +187,7 @@ export default function TimerApp() {
         <section id="day" className="t-section">
           <div className="t-head">
             <h2>The day</h2>
-            <p className="t-muted">Start from a day of the 5–11 Oct campaign or change the tasks. Every player plays all tasks at once and wins when all are done.</p>
+            <p className="t-muted">Start from a day of the 5–11 Oct campaign or change the tasks. Players run every game at the same time on auto, so everyone moves at the same pace and the number of players does not change the result.</p>
           </div>
           <div className="t-days" role="group" aria-label="Start from a day">
             {DAY_RESULTS.map((r) => (
@@ -263,11 +261,6 @@ export default function TimerApp() {
                   <input id="tol" type="number" min={5} max={120} step={5} value={tol} onChange={(e) => setTol(Math.max(5, Number(e.target.value) || 30))} />
                   <span className="t-muted">min</span>
                 </span>
-              </label>
-              <label>
-                <span>Players going for every task</span>
-                <input id="players" type="number" min={1} value={players} onChange={(e) => setPlayers(Math.max(1, Number(e.target.value) || 1))} />
-                <small className="t-muted">Real days: about 90–115 (players who started × 60%).</small>
               </label>
               <label>
                 <span>Prizes</span>
@@ -439,7 +432,7 @@ export default function TimerApp() {
           <div className="t-head">
             <h2>Check against the real days</h2>
             <p className="t-muted">
-              The pace of the other games is the one setting we fit: one number for all days ({FITTED_SPEED}× our starting guess). Everything else comes from the clock
+              The auto pace of the other games is the one setting we fit: one number for all days ({FITTED_SPEED}× our starting guess, for example Plinko {+(SIM_GAMES.find((g) => g.id === 'plinko')!.betsPerMin * FITTED_SPEED).toFixed(1)} bets a minute). Everything else comes from the clock
               and the paytables.
             </p>
           </div>
@@ -514,7 +507,7 @@ export default function TimerApp() {
                         </td>
                       );
                     })}
-                    <td>{g.shared ? `${Math.round(roundsPerHour(clock) / 60 * 10) / 10} rounds/min` : `${g.betsPerMin * FITTED_SPEED} bets/min`}</td>
+                    <td>{g.shared ? `${Math.round(roundsPerHour(clock) / 60 * 10) / 10} rounds/min` : `${+(g.betsPerMin * FITTED_SPEED).toFixed(1)} bets/min`}</td>
                     <td>
                       {g.sources.slice(0, 1).map((s) => (
                         <a key={s.url} href={s.url} target="_blank" rel="noreferrer">

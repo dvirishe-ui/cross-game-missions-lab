@@ -39,11 +39,15 @@ describe('last-prize model', () => {
     expect(r.pAllGone).toBe(0);
   });
   it('the fit lands every reported day inside a sensible range', () => {
-    const fit = fitSpeed(FIT_DAYS, games, { ...base, runs: 50 });
-    expect(fit.speed).toBeGreaterThan(1.4);
-    expect(fit.speed).toBeLessThan(2.9);
+    const fit = fitSpeed(FIT_DAYS, games, { ...base, spread: 0, runs: 50 });
+    expect(fit.speed).toBeGreaterThan(1);
+    expect(fit.speed).toBeLessThan(2);
     for (const d of fit.perDay) expect(Math.abs(Math.log(d.median / d.reported))).toBeLessThan(0.6);
   }, 120_000);
+  it('more players on auto barely move the last prize', () => {
+    const at = (players: number) => simulateDay(simMissionsForDay(7), games, { ...base, players, spread: 0, speed: 1.4, runs: 100 }).median;
+    expect(Math.abs(Math.log(at(500) / at(100)))).toBeLessThan(0.2);
+  });
   it('suggests a larger Aviator count to push the last prize later', () => {
     const missions = simMissionsForDay(2);
     const i = missions.findIndex((m) => m.game === 'aviator');
