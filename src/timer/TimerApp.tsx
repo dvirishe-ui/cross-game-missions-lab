@@ -13,21 +13,14 @@ import { goneByCurve, simulateDay, suggestTarget, type Suggestion, type TimerRes
 export const FITTED_SPEED = 1.4;
 
 const GAMES = gameMap(SIM_GAMES);
-const START = '19:00';
-const WINDOW_MIN = 299; // 19:00–23:59 UTC
+/** The daily challenge lasts 5 hours; everything is measured from its start. */
+const WINDOW_MIN = 300;
+const HOUR_TICKS = [0, 60, 120, 180, 240, 300];
+const hourLabel = (t: number) => `${t / 60}h`;
 const THRESHOLDS = [10, 15, 20, 30];
 
-const toMin = (hhmm: string) => {
-  const [h, m] = hhmm.split(':').map(Number);
-  return (h || 0) * 60 + (m || 0);
-};
-function clockAt(startMin: number, m: number): string {
-  if (!Number.isFinite(m)) return 'after close';
-  const t = Math.round(startMin + m) % 1440;
-  return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
-}
 function dur(m: number): string {
-  if (!Number.isFinite(m)) return 'never';
+  if (!Number.isFinite(m)) return 'not in time';
   const r = Math.round(m);
   return r < 60 ? `${r}m` : `${Math.floor(r / 60)}h ${String(r % 60).padStart(2, '0')}m`;
 }
@@ -50,16 +43,17 @@ type Verdict = 'early' | 'ontime' | 'late' | 'left';
 const VERDICT_TEXT: Record<Verdict, string> = { early: 'Too early', ontime: 'On time', late: 'Late', left: 'Prizes left over' };
 
 export default function TimerApp() {
-  const [target, setTarget] = useState('23:00');
+  const [targetH, setTargetH] = useState(4);
+  const [targetM, setTargetM] = useState(0);
   const [tol, setTol] = useState(30);
   const [prizes, setPrizes] = useState(50);
   const [bets, setBets] = useState<1 | 2>(2);
   const [clock, setClock] = useState<AviatorClock>(DEFAULT_CLOCK);
-  const startMin = toMin(START);
-  const targetMin = toMin(target) - startMin;
+  const targetMin = (Number.isFinite(targetH) ? targetH : 0) * 60 + (Number.isFinite(targetM) ? targetM : 0);
+  const target = dur(targetMin);
 
-  const [missions, setMissions] = useState<SimMission[]>(() => suggestedSet(toMin('23:00') - toMin(START), GAMES, FITTED_SPEED, DEFAULT_CLOCK, 2));
-  const [source, setSource] = useState('Suggested for 23:00');
+  const [missions, setMissions] = useState<SimMission[]>(() => suggestedSet(240, GAMES, FITTED_SPEED, DEFAULT_CLOCK, 2));
+  const [source, setSource] = useState('Suggested for 4h 00m');
   const [result, setResult] = useState<TimerResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [suggestion, setSuggestion] = useState<Suggestion | null | 'none'>(null);
@@ -67,7 +61,7 @@ export default function TimerApp() {
   const [backtest, setBacktest] = useState<{ day: number; reported: number; r: TimerResult }[]>([]);
   const beforeRef = useRef<HTMLElement>(null);
 
-  const ready = missions.length > 0 && missions.every(taskReady) && filled(prizes) && Number.isFinite(tol);
+  const ready = missions.length > 0 && missions.every(taskReady) && filled(prizes) && Number.isFinite(tol) && targetMin > 0;
   const settings: TimerSettings = useMemo(
     () => ({ players: Math.max(AUTO_PLAYERS, filled(prizes) ? prizes : 0), prizes, windowMin: WINDOW_MIN, betsPerRound: bets, clock, speed: FITTED_SPEED, spread: 0, runs: 300, seed: 7 }),
     [prizes, bets, clock],
@@ -173,7 +167,7 @@ export default function TimerApp() {
         <section id="calc" className="t-calc">
           <div className="t-calc-head">
             <h1>Will the last prize go at the right time?</h1>
-            <p className="t-muted">Set the tasks and the time you want the last prize to go. Window 19:00–23:59 UTC, everyone playing every game at once on auto.</p>
+            <p className="t-muted">Set the tasks and how long you want it to take until the last prize goes. The challenge lasts 5 hours, with everyone playing every game at once on auto.</p>
           </div>
 
           <div className="t-toolbar" role="toolbar" aria-label="Task sets">
@@ -243,9 +237,12 @@ export default function TimerApp() {
               </div>
               <div className="t-settings-row">
                 <label>
-                  <span>Last prize wanted at (UTC)</span>
+                  <span>Last prize should go after</span>
                   <span className="t-pair">
-                    <input id="target" type="time" value={target} min="19:00" max="23:59" onChange={(e) => setTarget(e.target.value || '23:00')} />
+                    <input id="target-h" aria-label="Hours" type="number" min={0} max={5} value={show(targetH)} onChange={(e) => setTargetH(num(e.target.value))} />
+                    <span className="t-muted">h</span>
+                    <input id="target-m" aria-label="Minutes" type="number" min={0} max={59} step={5} value={show(targetM)} onChange={(e) => setTargetM(num(e.target.value))} />
+                    <span className="t-muted">m</span>
                     <span className="t-muted">±</span>
                     <input id="tol" type="number" min={5} max={120} step={5} value={show(tol)} onChange={(e) => setTol(num(e.target.value))} />
                     <span className="t-muted">min</span>
@@ -270,21 +267,21 @@ export default function TimerApp() {
 
             <aside className={`t-verdict ${verdict ?? ''}`} aria-live="polite">
               <span className="t-chip">{!ready ? 'Waiting for numbers' : busy ? 'Calculating…' : verdict ? VERDICT_TEXT[verdict] : '—'}</span>
-              <p className="t-big">{!ready || !result ? '?' : verdict === 'left' ? `${Math.round(avgWinners)}/${prizes}` : clockAt(startMin, result.median)}</p>
+              <p className="t-big">{!ready || !result ? '?' : verdict === 'left' ? `${Math.round(avgWinners)}/${prizes}` : dur(result.median)}</p>
               <p className="t-big-cap">
                 {!ready
                   ? missions.length
                     ? 'Fill in every number to see when the last prize goes.'
                     : 'Add a task, or press Suggested or Random.'
                   : verdict === 'left'
-                    ? 'prizes won by 23:59, typical day'
-                    : 'last prize goes, typical day (UTC)'}
+                    ? 'prizes won in 5 hours, typical day'
+                    : 'until the last prize goes, typical day'}
               </p>
               <p className="t-sub">
                 {ready && result && verdict !== 'left' && (
                   <>
-                    {verdict === 'early' && `About ${dur(targetMin - result.median)} before ${target}.`}
-                    {verdict === 'late' && `About ${dur(result.median - targetMin)} after ${target}.`}
+                    {verdict === 'early' && `About ${dur(targetMin - result.median)} shorter than ${target}.`}
+                    {verdict === 'late' && `About ${dur(result.median - targetMin)} longer than ${target}.`}
                     {verdict === 'ontime' && `Within ${tol} min of ${target}.`}
                   </>
                 )}
@@ -296,7 +293,7 @@ export default function TimerApp() {
                   <dd>{ready && result ? `${Math.round(inBand * 100)}%` : '?'}</dd>
                 </div>
                 <div>
-                  <dt>All prizes go by 23:59</dt>
+                  <dt>All prizes go within 5h</dt>
                   <dd>{ready && result ? `${Math.round(result.pAllGone * 100)}%` : '?'}</dd>
                 </div>
                 <div className="wide">
@@ -313,9 +310,9 @@ export default function TimerApp() {
                 <h3>Chance the last prize has gone, by time</h3>
                 <span className="t-muted t-small">300 simulated days</span>
               </div>
-              <GoneChart result={result} startMin={startMin} targetMin={targetMin} tol={tol} />
+              <GoneChart result={result} targetMin={targetMin} tol={tol} />
               <h3>When the {prizes}th player finishes each task</h3>
-              <TaskBars missions={missions} result={result} startMin={startMin} targetMin={targetMin} />
+              <TaskBars missions={missions} result={result} targetMin={targetMin} />
               <div className="t-fix">
                 <p>
                   {slow && (
@@ -339,7 +336,7 @@ export default function TimerApp() {
                   <div className="t-suggest">
                     <p>
                       Change <b>{describe(missions[suggestion.mission])}</b> to <b>{suggestion.to}</b> (from {suggestion.from}): last prize about{' '}
-                      <b>{clockAt(startMin, suggestion.result.median)}</b>.
+                      <b>{dur(suggestion.result.median)}</b>.
                     </p>
                     <button id="apply-fix" className="t-btn primary" onClick={() => edit(suggestion.mission, { target: suggestion.to })}>
                       Use {suggestion.to}
@@ -349,6 +346,13 @@ export default function TimerApp() {
               </div>
             </div>
           )}
+          <OneTask
+            settings={settings}
+            onAdd={(m) => {
+              setTasks([...missions, m], 'Your tasks');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+          />
         </section>
 
         {showBefore && (
@@ -368,7 +372,7 @@ export default function TimerApp() {
                 <div className={`t-daycard ${r.winners === 0 ? 'bad' : ''}`} key={r.day}>
                   <div className="t-row-between">
                     <b>Day {r.day}</b>
-                    <span className="t-mono">{r.winners === 0 ? '0 winners' : `last prize ${clockAt(startMin, r.durationMin)}`}</span>
+                    <span className="t-mono">{r.winners === 0 ? '0 winners' : `last prize after ${dur(r.durationMin)}`}</span>
                   </div>
                   <ul>
                     {simMissionsForDay(r.day).map((m, i) => (
@@ -393,21 +397,21 @@ export default function TimerApp() {
                     return (
                       <div className="t-bt-row" key={b.day}>
                         <span className="t-bt-day">Day {b.day}</span>
-                        <div className="t-track" aria-label={`Day ${b.day}: real ${clockAt(startMin, b.reported)}, model ${clockAt(startMin, b.r.p10)} to ${clockAt(startMin, b.r.p90)}`}>
+                        <div className="t-track" aria-label={`Day ${b.day}: real ${dur(b.reported)}, model ${dur(b.r.p10)} to ${dur(b.r.p90)}`}>
                           <i className="range" style={{ left: `${pos(b.r.p10)}%`, width: `${Math.max(0.8, pos(b.r.p90) - pos(b.r.p10))}%` }} />
                           <i className="med" style={{ left: `${pos(b.r.median)}%` }} />
                           <i className="real" style={{ left: `${pos(b.reported)}%` }} />
                         </div>
                         <span className={`t-bt-txt ${inside ? '' : 'off'}`}>
-                          real {clockAt(startMin, b.reported)} · calc {clockAt(startMin, b.r.median)}
+                          real {dur(b.reported)} · calc {dur(b.r.median)}
                         </span>
                       </div>
                     );
                   })}
                   <div className="t-axis" aria-hidden="true">
-                    {[0, 60, 120, 180, 240, 299].map((m) => (
+                    {HOUR_TICKS.map((m) => (
                       <span key={m} style={{ left: `${pos(m)}%` }}>
-                        {clockAt(startMin, m)}
+                        {hourLabel(m)}
                       </span>
                     ))}
                   </div>
@@ -605,7 +609,7 @@ function pctText(p: number): string {
   return `${p < 0.1 ? (p * 100).toFixed(1) : Math.round(p * 100)}%`;
 }
 
-function GoneChart({ result, startMin, targetMin, tol }: { result: TimerResult; startMin: number; targetMin: number; tol: number }) {
+function GoneChart({ result, targetMin, tol }: { result: TimerResult; targetMin: number; tol: number }) {
   const W = 720;
   const H = 220;
   const m = { l: 44, r: 14, t: 12, b: 30 };
@@ -616,7 +620,7 @@ function GoneChart({ result, startMin, targetMin, tol }: { result: TimerResult; 
   const area = `${line}L${x(WINDOW_MIN)},${y(0)}L${x(0)},${y(0)}Z`;
   return (
     <div className="t-chart">
-      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Chance the last prize has gone over the window. Typical: ${clockAt(startMin, result.median)}.`}>
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Chance the last prize has gone over the window. Typical: ${dur(result.median)}.`}>
         <rect x={x(targetMin - tol)} y={m.t} width={Math.max(0, x(targetMin + tol) - x(targetMin - tol))} height={H - m.t - m.b} className="band" />
         {[0, 0.5, 1].map((p) => (
           <g key={p}>
@@ -626,9 +630,9 @@ function GoneChart({ result, startMin, targetMin, tol }: { result: TimerResult; 
             </text>
           </g>
         ))}
-        {[0, 60, 120, 180, 240, 299].map((t) => (
-          <text key={t} x={x(t)} y={H - 8} textAnchor={t === 0 ? 'start' : t === 299 ? 'end' : 'middle'}>
-            {clockAt(startMin, t)}
+        {HOUR_TICKS.map((t) => (
+          <text key={t} x={x(t)} y={H - 8} textAnchor={t === 0 ? 'start' : t === WINDOW_MIN ? 'end' : 'middle'}>
+            {hourLabel(t)}
           </text>
         ))}
         <path d={area} className="area" />
@@ -637,7 +641,7 @@ function GoneChart({ result, startMin, targetMin, tol }: { result: TimerResult; 
           <g>
             <circle cx={x(result.median)} cy={y(0.5)} r={5} className="dot" />
             <text x={x(result.median) + (result.median > WINDOW_MIN * 0.8 ? -8 : 8)} y={y(0.5) - 8} textAnchor={result.median > WINDOW_MIN * 0.8 ? 'end' : 'start'} className="lbl">
-              typical {clockAt(startMin, result.median)}
+              typical {dur(result.median)}
             </text>
           </g>
         )}
@@ -649,7 +653,7 @@ function GoneChart({ result, startMin, targetMin, tol }: { result: TimerResult; 
   );
 }
 
-function TaskBars({ missions, result, startMin, targetMin }: { missions: SimMission[]; result: TimerResult; startMin: number; targetMin: number }) {
+function TaskBars({ missions, result, targetMin }: { missions: SimMission[]; result: TimerResult; targetMin: number }) {
   return (
     <div className="t-bars">
       {missions.map((m, i) => {
@@ -661,10 +665,94 @@ function TaskBars({ missions, result, startMin, targetMin }: { missions: SimMiss
               <i className={`fill ${Number.isFinite(t) ? '' : 'never'}`} style={{ width: `${pos(t)}%` }} />
               <i className="tgt" style={{ left: `${pos(targetMin)}%` }} />
             </div>
-            <span className="t-bar-time">{Number.isFinite(t) ? clockAt(startMin, t) : 'not in time'}</span>
+            <span className="t-bar-time">{dur(t)}</span>
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/** How long a single task takes for one player on auto, outside the 5-hour limit. */
+const ONE_TASK_HORIZON = 48 * 60;
+
+function OneTask({ settings, onAdd }: { settings: TimerSettings; onAdd: (m: SimMission) => void }) {
+  const [m, setM] = useState<SimMission>({ game: 'plinko', kind: 'catch', threshold: 15, target: 20 });
+  const [time, setTime] = useState<number | null>(null);
+  const ok = taskReady(m);
+  const g = GAMES[m.game];
+
+  useEffect(() => {
+    if (!ok) return setTime(null);
+    const t = setTimeout(() => {
+      const r = simulateDay([m], GAMES, { ...settings, players: 1, prizes: 1, runs: 200, windowMin: ONE_TASK_HORIZON }, ONE_TASK_HORIZON);
+      setTime(r.median);
+    }, 60);
+    return () => clearTimeout(t);
+  }, [m, settings, ok]);
+
+  const set = (patch: Partial<SimMission>) => setM({ ...m, ...patch });
+  const p = m.kind === 'catch' && filled(m.threshold) ? missionChance(m, g) : null;
+  let work = '';
+  if (ok) {
+    const per = g.shared ? 'rounds' : 'bets';
+    const perBet = g.shared ? settings.betsPerRound : 1;
+    let n = m.kind === 'bets' ? m.target / perBet : NaN;
+    if (m.kind === 'catch' && p) n = Math.ceil(m.target / perBet) / p;
+    if (m.kind === 'collect') {
+      const c = chanceAtLeast(g, 2);
+      n = c.p > 0 ? Math.ceil(m.target / c.pays / perBet) / c.p : NaN;
+    }
+    if (Number.isFinite(n)) work = `about ${Math.round(n).toLocaleString('en-US')} ${per}`;
+  }
+
+  return (
+    <div className="t-card t-one">
+      <div className="t-head">
+        <h3>Check one task</h3>
+        <p className="t-muted t-small">How long a single task takes one player on auto, on its own.</p>
+      </div>
+      <div className="t-one-grid">
+        <div className="t-task">
+          <select id="one-game" aria-label="Game" value={m.game} onChange={(e) => set({ game: e.target.value as GameId })}>
+            {SIM_GAMES.map((x) => (
+              <option key={x.id} value={x.id}>
+                {x.name}
+              </option>
+            ))}
+          </select>
+          <select
+            id="one-kind"
+            aria-label="Task type"
+            value={m.kind}
+            onChange={(e) => set({ kind: e.target.value as SimMission['kind'], threshold: e.target.value === 'catch' ? m.threshold ?? 20 : undefined })}
+          >
+            <option value="catch">Catch X× or more</option>
+            <option value="collect">Collect X× in total</option>
+            <option value="bets">Place bets</option>
+          </select>
+          {m.kind === 'catch' && (
+            <label className="t-inline">
+              <input id="one-x" type="number" min={1} value={show(m.threshold)} onChange={(e) => set({ threshold: num(e.target.value) })} />×
+            </label>
+          )}
+          <label className="t-inline">
+            {m.kind === 'catch' ? 'times' : m.kind === 'collect' ? 'total ×' : 'bets'}
+            <input id="one-n" type="number" min={1} value={show(m.target)} onChange={(e) => set({ target: num(e.target.value) })} />
+          </label>
+        </div>
+        <div className="t-one-result" aria-live="polite">
+          <b>{!ok ? '?' : time == null ? '…' : Number.isFinite(time) ? dur(time) : 'over 48h'}</b>
+          <span>
+            {!ok
+              ? 'Fill in the numbers.'
+              : [p != null ? (p > 0 ? `${oneIn(p)} ${g.shared ? 'rounds' : 'bets'}` : 'impossible in this game') : '', work].filter(Boolean).join(' · ')}
+          </span>
+        </div>
+        <button id="one-add" className="t-btn" disabled={!ok} onClick={() => onAdd(m)}>
+          Add to the day
+        </button>
+      </div>
     </div>
   );
 }
