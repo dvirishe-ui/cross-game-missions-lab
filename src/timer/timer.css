@@ -51,7 +51,8 @@ a { color: var(--model); text-underline-offset: 3px; }
 
 .t-wrap { max-width: 1080px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
 .t-top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 50; background: color-mix(in srgb, var(--bg) 90%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
-.t-top-row { display: flex; gap: 16px; align-items: center; justify-content: space-between; padding-block: 12px; }
+.t-top-row { display: flex; gap: 16px; align-items: center; padding-block: 12px; }
+.t-top-row .t-nav { margin-left: auto; }
 .t-brand { font-family: var(--font-display); font-weight: 800; font-size: 1.05rem; white-space: nowrap; }
 .t-brand b { color: var(--accent); }
 .t-nav { display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; min-width: 0; }
@@ -225,3 +226,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .t-length-chips button { font-family: var(--font-mono); font-size: 0.86rem; padding: 6px 12px; border-radius: 999px; }
 .t-length-chips button[aria-pressed='true'] { background: var(--accent-soft); border-color: var(--accent); }
 .t-length-custom input { width: 80px; }
+
+.t-theme { display: flex; flex: none; border: 1px solid var(--line); border-radius: 999px; padding: 2px; background: var(--surface); }
+.t-theme button { border: 0; border-radius: 999px; padding: 4px 10px; font-size: 0.8rem; background: transparent; color: var(--muted); }
+.t-theme button[aria-pressed='true'] { background: var(--fg); color: var(--bg); }
+@media (max-width: 640px) { .t-top-row { justify-content: space-between; } }
