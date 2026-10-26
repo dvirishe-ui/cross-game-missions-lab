@@ -16,6 +16,14 @@ describe('task sets', () => {
     const r = simulateDay(final, games, base);
     expect(Math.abs(r.median - target)).toBeLessThan(30);
   }, 20_000);
+  it.each([[45, 36], [1440, 1150]])('a %i-minute challenge gets tasks for about %i minutes', (w, target) => {
+    const s = { ...base, windowMin: w };
+    const set = suggestedSet(target, games, 1.4, DEFAULT_CLOCK, 2);
+    const tuned = suggestTarget(set, games, s, target, 0);
+    const final = tuned ? set.map((m, i) => (i === 0 ? { ...m, target: tuned.to } : m)) : set;
+    const r = simulateDay(final, games, s);
+    expect(Math.abs(r.median - target) / target).toBeLessThan(0.2);
+  }, 60_000);
   it('random sets only use reachable multipliers', () => {
     for (let seed = 1; seed < 40; seed++)
       for (const m of randomSet(seed, games)) if (m.kind === 'catch') expect(chanceAtLeast(games[m.game], m.threshold!).p).toBeGreaterThanOrEqual(1 / 2000);
