@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
 const pages = [
-  { html: 'last-prize.html', out: 'last-prize-timer.html', title: 'Last Prize Timer', description: 'Predicts when the last mission prize goes, using a researched Aviator round clock and Spribe paytables.' },
+  { html: 'last-prize.html', out: 'last-prize-timer.html', title: 'Promo Toolkit', description: 'Mission calculator, promo checker, prize split, preparation timeline and T&C generator for SPRIBE promotions.' },
   { html: 'index.html', out: 'missions-simulator.html', title: 'Missions Simulator', description: 'Simulate when the last prize goes in a SPRIBE cross-game mission day.' },
   { html: 'retention.html', out: 'do-players-stay.html', title: 'Do Players Stay?', description: 'Players of the six promo games before, during and after the cross-game promotion at football.com Nigeria.' },
   { html: 'brief.html', out: 'cross-game-missions-brief.html', title: 'Competitor Missions', description: 'How other casino companies run missions: task types, durations and prize pools, with sources.' },

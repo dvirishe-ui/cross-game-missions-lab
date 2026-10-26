@@ -16,3 +16,6 @@ export const FIT_DAYS: FitDay[] = DAY_RESULTS.filter((r) => r.winners > 0).map((
   players: AUTO_PLAYERS,
   reportedMin: r.durationMin,
 }));
+
+/** Auto pace of the non-Aviator games, fitted to Days 1–5 and 7 with everyone on auto and two Aviator bets a round (see model.test.ts). */
+export const FITTED_SPEED = 1.4;

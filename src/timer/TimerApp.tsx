@@ -5,12 +5,20 @@ import { gameMap, missionChance, type SimMission } from '../sim/engine';
 import { SIM_GAMES, chanceAtLeast, fmtX, oneIn } from '../sim/games';
 import { simMissionsForDay } from '../sim/days';
 import { AVIATOR_SOURCES, DEFAULT_CLOCK, chanceAtLeastHits, clockBounds, flightSec, hitsPerHour, meanRoundSec, roundsPerHour, type AviatorClock } from './clock';
-import { AUTO_PLAYERS, FIT_DAYS } from './days';
+import { AUTO_PLAYERS, FITTED_SPEED, FIT_DAYS } from './days';
 import { randomSet, suggestedSet } from './generate';
 import { goneByCurve, simulateDay, suggestTarget, type Suggestion, type TimerResult, type TimerSettings } from './model';
+import type { CalcState } from '../toolkit/model/project';
 
-/** Auto pace of the non-Aviator games, fitted to Days 1–5 and 7 with everyone on auto and two Aviator bets a round (see model.test.ts). */
-export const FITTED_SPEED = 1.4;
+/** Connects the calculator to the Promo Toolkit's current project. Without it the calculator works on its own. */
+export interface CalcBridge {
+  initial: CalcState | null;
+  onChange: (s: CalcState) => void;
+  onResult: (s: CalcState, r: TimerResult) => void;
+  days: { id: string; label: string }[];
+  onSaveToDay: (dayId: string, missions: SimMission[]) => void;
+}
+
 
 const GAMES = gameMap(SIM_GAMES);
 /** The 5–11 Oct challenge ran 5 hours a day; the "before" panel is drawn on that scale. */
@@ -53,19 +61,23 @@ const taskReady = (m: SimMission) => filled(m.target) && (m.kind !== 'catch' || 
 type Verdict = 'early' | 'ontime' | 'late' | 'left';
 const VERDICT_TEXT: Record<Verdict, string> = { early: 'Too early', ontime: 'On time', late: 'Late', left: 'Prizes left over' };
 
-export default function TimerApp() {
-  const [windowMin, setWindowMin] = useState(300);
-  const [targetH, setTargetH] = useState(4);
-  const [targetM, setTargetM] = useState(0);
-  const [tol, setTol] = useState(30);
-  const [prizes, setPrizes] = useState(50);
-  const [bets, setBets] = useState<1 | 2>(2);
+export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
+  const init = bridge?.initial ?? null;
+  const [windowMin, setWindowMin] = useState(init?.windowMin ?? 300);
+  const [targetH, setTargetH] = useState(Math.floor((init?.targetMin ?? 240) / 60));
+  const [targetM, setTargetM] = useState((init?.targetMin ?? 240) % 60);
+  const [tol, setTol] = useState(init?.tol ?? 30);
+  const [prizes, setPrizes] = useState(init?.prizes ?? 50);
+  const [bets, setBets] = useState<1 | 2>(init?.bets ?? 2);
+  const [dayId, setDayId] = useState<string | null>(init?.dayId ?? null);
+  const [saveTo, setSaveTo] = useState<string>(init?.dayId ?? 'new');
+  const [savedNote, setSavedNote] = useState('');
   const [clock, setClock] = useState<AviatorClock>(DEFAULT_CLOCK);
   const targetMin = (Number.isFinite(targetH) ? targetH : 0) * 60 + (Number.isFinite(targetM) ? targetM : 0);
   const target = dur(targetMin);
 
-  const [missions, setMissions] = useState<SimMission[]>(() => suggestedSet(240, GAMES, FITTED_SPEED, DEFAULT_CLOCK, 2));
-  const [source, setSource] = useState('Suggested: last prize after 4h 00m of 5h 00m');
+  const [missions, setMissions] = useState<SimMission[]>(() => init?.missions ?? suggestedSet(240, GAMES, FITTED_SPEED, DEFAULT_CLOCK, 2));
+  const [source, setSource] = useState(init?.source ?? 'Suggested: last prize after 4h 00m of 5h 00m');
   const [result, setResult] = useState<TimerResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [suggestion, setSuggestion] = useState<Suggestion | null | 'none'>(null);
@@ -79,14 +91,25 @@ export default function TimerApp() {
     [prizes, bets, clock, windowMin],
   );
 
+  const calcState: CalcState = { missions, windowMin, targetMin, tol, prizes, bets, source, dayId };
+  const bridgeRef = useRef(bridge);
+  bridgeRef.current = bridge;
+  useEffect(() => {
+    bridgeRef.current?.onChange(calcState);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [missions, windowMin, targetMin, tol, prizes, bets, source, dayId]);
+
   useEffect(() => {
     setBusy(true);
     setSuggestion(null);
     const t = setTimeout(() => {
-      setResult(ready ? simulateDay(missions, GAMES, settings) : null);
+      const r = ready ? simulateDay(missions, GAMES, settings) : null;
+      setResult(r);
       setBusy(false);
+      if (r) bridgeRef.current?.onResult(calcState, r);
     }, 60);
     return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [missions, settings, ready]);
 
   useEffect(() => {
@@ -171,22 +194,6 @@ export default function TimerApp() {
 
   return (
     <>
-      <header className="t-top">
-        <div className="t-wrap t-top-row">
-          <span className="t-brand">
-            Last Prize <b>Timer</b>
-          </span>
-          <nav className="t-nav" aria-label="Sections">
-            <a href="#calc">Calculator</a>
-            <a href="#how">How it works</a>
-            <a href="#before" onClick={openBefore}>
-              What was before
-            </a>
-          </nav>
-          <ThemeToggle />
-        </div>
-      </header>
-
       <main className="t-wrap t-main">
         <section id="calc" className="t-calc">
           <div className="t-calc-head">
@@ -246,6 +253,33 @@ export default function TimerApp() {
                 <h3>Tasks</h3>
                 <span className="t-source">{source}</span>
               </div>
+              {bridge && (
+                <div className="t-saveday">
+                  <label htmlFor="save-to-day">Save these tasks to</label>
+                  <select id="save-to-day" value={saveTo} onChange={(e) => setSaveTo(e.target.value)}>
+                    {bridge.days.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.label}
+                      </option>
+                    ))}
+                    <option value="new">A new day</option>
+                  </select>
+                  <button
+                    id="save-day"
+                    className="t-btn"
+                    disabled={!missions.length}
+                    onClick={() => {
+                      bridge.onSaveToDay(saveTo, missions);
+                      if (saveTo !== 'new') setDayId(saveTo);
+                      setSavedNote(saveTo === 'new' ? 'Added as a new day in the campaign.' : `Saved to ${bridge.days.find((d) => d.id === saveTo)?.label ?? 'the day'}.`);
+                      setTimeout(() => setSavedNote(''), 4000);
+                    }}
+                  >
+                    Save to campaign
+                  </button>
+                  {savedNote && <span className="t-ok-note">{savedNote}</span>}
+                </div>
+              )}
               {missions.length === 0 && <p className="t-muted">No tasks yet. Press Suggested, Random or + Add task.</p>}
               <div className="t-tasks">
                 {missions.map((m, i) => {
@@ -363,7 +397,7 @@ export default function TimerApp() {
                 <span className="t-muted t-small">300 simulated days</span>
               </div>
               <GoneChart result={result} targetMin={targetMin} tol={tol} windowMin={windowMin} />
-              <h3>When the {prizes}th player finishes each task</h3>
+              <h3>Each mission: when the {prizes}th player finishes it</h3>
               <TaskBars missions={missions} result={result} targetMin={targetMin} windowMin={windowMin} />
               <div className="t-fix">
                 <p>
@@ -712,7 +746,9 @@ function TaskBars({ missions, result, targetMin, windowMin }: { missions: SimMis
         const t = result.missionNthMedian[i];
         return (
           <div className={`t-bar-row ${i === result.slowest ? 'slow' : ''}`} key={i}>
-            <span className="t-bar-name">{describe(m)}</span>
+            <span className="t-bar-name">
+              <b>Mission {i + 1}</b> · {describe(m)}
+            </span>
             <div className="t-track">
               <i className={`fill ${Number.isFinite(t) ? '' : 'never'}`} style={{ width: `${pos(t, windowMin)}%` }} />
               <i className="tgt" style={{ left: `${pos(targetMin, windowMin)}%` }} />
@@ -809,41 +845,3 @@ function OneTask({ settings, onAdd }: { settings: TimerSettings; onAdd: (m: SimM
   );
 }
 
-type Theme = 'auto' | 'light' | 'dark';
-const THEME_KEY = 'last-prize-theme';
-
-/** Bright / dark switch. Auto follows the device; the choice is remembered in this browser only. */
-function ThemeToggle() {
-  const [theme, setTheme] = useState<Theme>(() => {
-    try {
-      const v = localStorage.getItem(THEME_KEY);
-      return v === 'light' || v === 'dark' ? v : 'auto';
-    } catch {
-      return 'auto';
-    }
-  });
-  useEffect(() => {
-    const root = document.documentElement;
-    if (theme === 'auto') root.removeAttribute('data-theme');
-    else root.setAttribute('data-theme', theme);
-    try {
-      localStorage.setItem(THEME_KEY, theme);
-    } catch {
-      /* storage unavailable: the choice lasts for this visit */
-    }
-  }, [theme]);
-  const options: [Theme, string][] = [
-    ['light', 'Bright'],
-    ['dark', 'Dark'],
-    ['auto', 'Auto'],
-  ];
-  return (
-    <div className="t-theme" role="group" aria-label="Colour theme">
-      {options.map(([v, label]) => (
-        <button key={v} id={`theme-${v}`} aria-pressed={theme === v} onClick={() => setTheme(v)}>
-          {label}
-        </button>
-      ))}
-    </div>
-  );
-}

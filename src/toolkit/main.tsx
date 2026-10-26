@@ -1,10 +1,11 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import TimerApp from './TimerApp';
-import './timer.css';
+import ToolkitApp from './ToolkitApp';
+import '../timer/timer.css';
+import './toolkit.css';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <TimerApp />
+    <ToolkitApp />
   </StrictMode>,
 );
