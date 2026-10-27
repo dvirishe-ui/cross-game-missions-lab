@@ -1,12 +1,14 @@
 // When does the last prize go? Agent-based simulation of one mission day.
-// Aviator rounds are generated on a real clock (see clock.ts) and shared by
-// every player; the other games use per-bet chances from their paytables and
-// a pace that is fitted to the reported days.
+// Aviator and Trader are simulated round by round: each round's result comes
+// from Aviator's provably-fair formula (provablyFair.ts), on a real clock, and
+// is shared by every player. The other games use per-bet chances from their
+// paytables and an auto pace fitted to the reported days.
 
 import { mulberry32, sampleNegBinomAttempts, type Rng } from '../math/rng';
 import { COLLECT_AIM, missionChance, type SimMission } from '../sim/engine';
 import { chanceAtLeast, type SimGame } from '../sim/games';
-import { flightSec, type AviatorClock } from './clock';
+import { flightSec, TRADER_CLOCK, TRADER_MAX, type AviatorClock } from './clock';
+import { crashFromH, random52 } from './provablyFair';
 
 export interface TimerSettings {
   /** Players who go for every task. */
@@ -51,12 +53,18 @@ interface Rounds {
   crash: Float64Array;
 }
 
-function makeRounds(c: AviatorClock, minutes: number, rng: Rng): Rounds {
+/** Games played in shared rounds, with their clock and maximum multiplier. */
+export const ROUND_GAMES: Record<string, { clock: (s: TimerSettings) => AviatorClock; max: number }> = {
+  aviator: { clock: (s) => s.clock, max: Infinity },
+  trader: { clock: () => TRADER_CLOCK, max: TRADER_MAX },
+};
+
+function makeRounds(c: AviatorClock, max: number, minutes: number, rng: Rng): Rounds {
   const starts: number[] = [];
   const crashes: number[] = [];
   let t = 0;
   while (t < minutes * 60) {
-    const crash = Math.max(1, c.rtp / (1 - rng()));
+    const crash = Math.min(max, crashFromH(random52(rng), Math.round(c.rtp * 100)));
     const takeoff = t + c.betSec;
     starts.push(takeoff / 60);
     crashes.push(crash);
@@ -98,14 +106,20 @@ function soloTime(m: SimMission, g: SimGame, rate: number, rng: Rng): number {
 }
 
 export function runDay(missions: SimMission[], games: Record<string, SimGame>, s: TimerSettings, rng: Rng, horizon = s.windowMin): TimerRun {
-  const rounds = missions.some((m) => games[m.game].shared) ? makeRounds(s.clock, horizon, mulberry32(Math.floor(rng() * 4294967296))) : null;
-  // Qualifying rounds per Aviator mission: the minute a cash-out at x is reached.
+  // One shared round sequence per round game (Aviator, Trader).
+  const rounds = new Map<string, Rounds>();
+  for (const m of missions) {
+    const rg = ROUND_GAMES[m.game];
+    if (rg && !rounds.has(m.game)) rounds.set(m.game, makeRounds(rg.clock(s), rg.max, horizon, mulberry32(Math.floor(rng() * 4294967296))));
+  }
+  // Qualifying rounds per round-game mission: the minute a cash-out at x is reached.
   const hits = missions.map((m) => {
-    if (!rounds || !games[m.game].shared) return null;
+    const r = rounds.get(m.game);
+    if (!r) return null;
     const { x, rounds: need } = aviatorNeed(m, games[m.game], s.betsPerRound);
     const at: number[] = [];
-    const fly = flightSec(x, s.clock) / 60;
-    for (let i = 0; i < rounds.crash.length; i++) if (rounds.crash[i] >= x) at.push(rounds.start[i] + fly);
+    const fly = flightSec(x, ROUND_GAMES[m.game].clock(s)) / 60;
+    for (let i = 0; i < r.crash.length; i++) if (r.crash[i] >= x) at.push(r.start[i] + fly);
     return { at, need };
   });
   const times: number[][] = missions.map(() => []);

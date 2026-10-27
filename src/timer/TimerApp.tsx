@@ -2,12 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { DAY_RESULTS } from '../data/previousCampaign';
 import type { GameId } from '../data/games';
 import { gameMap, missionChance, type SimMission } from '../sim/engine';
-import { SIM_GAMES, chanceAtLeast, fmtX, oneIn } from '../sim/games';
+import { SIM_GAMES, chanceAtLeast, oneIn } from '../sim/games';
 import { simMissionsForDay } from '../sim/days';
-import { AVIATOR_SOURCES, DEFAULT_CLOCK, chanceAtLeastHits, clockBounds, flightSec, hitsPerHour, meanRoundSec, roundsPerHour, type AviatorClock } from './clock';
+import { DEFAULT_CLOCK, chanceAtLeastHits, meanRoundSec, roundsPerHour } from './clock';
+import { verifyAviatorRound } from './provablyFair';
 import { AUTO_PLAYERS, FITTED_SPEED, FIT_DAYS } from './days';
 import { randomSet, suggestedSet } from './generate';
-import { goneByCurve, simulateDay, suggestTarget, type Suggestion, type TimerResult, type TimerSettings } from './model';
+import { goneByCurve, ROUND_GAMES, simulateDay, suggestTarget, type Suggestion, type TimerResult, type TimerSettings } from './model';
 import type { CalcState } from '../toolkit/model/project';
 
 /** Connects the calculator to the Promo Toolkit's current project. Without it the calculator works on its own. */
@@ -36,7 +37,6 @@ function ticks(w: number): number[] {
   return out;
 }
 const tickLabel = (t: number) => (t % 60 === 0 ? `${t / 60}h` : t < 60 ? `${t}m` : `${Math.floor(t / 60)}h${t % 60}`);
-const THRESHOLDS = [10, 15, 20, 30];
 
 function dur(m: number): string {
   if (!Number.isFinite(m)) return 'not in time';
@@ -72,7 +72,7 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
   const [dayId, setDayId] = useState<string | null>(init?.dayId ?? null);
   const [saveTo, setSaveTo] = useState<string>(init?.dayId ?? 'new');
   const [savedNote, setSavedNote] = useState('');
-  const [clock, setClock] = useState<AviatorClock>(DEFAULT_CLOCK);
+  const clock = DEFAULT_CLOCK;
   const targetMin = (Number.isFinite(targetH) ? targetH : 0) * 60 + (Number.isFinite(targetM) ? targetM : 0);
   const target = dur(targetMin);
 
@@ -180,7 +180,6 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
     }, 30);
   };
 
-  const { slow: slowClock, fast: fastClock } = clockBounds(clock);
   const aviatorDays = DAY_RESULTS.filter((r) => r.winners > 0).map((r) => {
     const m = simMissionsForDay(r.day).find((x) => x.game === 'aviator')!;
     return {
@@ -406,8 +405,8 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
                       <b>{describe(slow)}</b> decides the time on most simulated days.{' '}
                     </>
                   )}
-                  {slow && GAMES[slow.game].shared
-                    ? 'Aviator rounds are shared, so everyone on auto finishes this task at the same moment: the time depends on when the big rounds come.'
+                  {slow && ROUND_GAMES[slow.game]
+                    ? `${GAMES[slow.game].name} rounds are shared, so everyone on auto finishes this task at the same moment: the time depends on when the big rounds come.`
                     : slow
                       ? 'This is a luck task in a game where each player gets their own results, so it swings more from day to day than an Aviator task.'
                       : ''}
@@ -553,135 +552,22 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
           </section>
         )}
 
-        <section id="how" className="t-section">
-          <div className="t-head">
-            <p className="t-eyebrow">How it works</p>
-            <h2>The Aviator clock</h2>
-            <p className="t-muted">
-              Spribe does not publish round timing, so we built it from public measurements: a betting countdown, a flight where the multiplier grows exponentially, and a
-              short pause. With a 97% RTP the average flight is exactly 0.97 ÷ growth rate.
-            </p>
-          </div>
-          <div className="t-tiles">
-            <div className="t-tile">
-              <span>Average round</span>
-              <b>{meanRoundSec(clock).toFixed(1)} s</b>
-              <small>
-                range {meanRoundSec(fastClock).toFixed(0)}–{meanRoundSec(slowClock).toFixed(0)} s
-              </small>
-            </div>
-            <div className="t-tile">
-              <span>Rounds an hour</span>
-              <b>{Math.round(roundsPerHour(clock))}</b>
-              <small>
-                range {Math.round(roundsPerHour(slowClock))}–{Math.round(roundsPerHour(fastClock))}
-              </small>
-            </div>
-            <div className="t-tile">
-              <span>30× is reached after</span>
-              <b>{Math.round(flightSec(30, clock))} s</b>
-              <small>of flight</small>
-            </div>
-            <div className="t-tile">
-              <span>Rounds reaching 30× an hour</span>
-              <b>{hitsPerHour(30, clock).toFixed(1)}</b>
-              <small>1 in {Math.round(30 / clock.rtp)} rounds</small>
-            </div>
-          </div>
-          <div className="t-split">
-            <div className="t-card">
-              <h3>Sources</h3>
-              <ul className="t-sources">
-                {AVIATOR_SOURCES.map((s) => (
-                  <li key={s.url}>
-                    <a href={s.url} target="_blank" rel="noreferrer">
-                      {s.label}
-                    </a>
-                  </li>
-                ))}
-                <li>Other guides quote anywhere from 60 to 360 rounds an hour; these are the ones that state their method.</li>
-              </ul>
-              <p className="t-muted t-small">Best data: our own round log for football.com (crash point and time per round). With it the clock is exact instead of modelled.</p>
-            </div>
-            <div className="t-card t-settings">
-              <h3>Clock settings</h3>
-              <label>
-                <span>Betting countdown (s)</span>
-                <input id="bet-sec" type="number" min={1} step={0.5} value={clock.betSec} onChange={(e) => setClock({ ...clock, betSec: Math.max(0, Number(e.target.value) || 0) })} />
-              </label>
-              <label>
-                <span>Multiplier doubles every (s)</span>
-                <input
-                  id="double-sec"
-                  type="number"
-                  min={3}
-                  step={0.5}
-                  value={+(Math.LN2 / clock.k).toFixed(1)}
-                  onChange={(e) => setClock({ ...clock, k: Math.LN2 / Math.max(1, Number(e.target.value) || 10.7) })}
-                />
-              </label>
-              <label>
-                <span>Pause after the crash (s)</span>
-                <input id="pause-sec" type="number" min={0} step={0.5} value={clock.pauseSec} onChange={(e) => setClock({ ...clock, pauseSec: Math.max(0, Number(e.target.value) || 0) })} />
-              </label>
-              <button id="reset-clock" className="t-btn" onClick={() => setClock(DEFAULT_CLOCK)}>
-                Reset to research values
-              </button>
-            </div>
-          </div>
-
-          <div className="t-head">
-            <h2>The other games</h2>
-            <p className="t-muted">Chance per bet of a result at or above each multiplier, from Spribe’s published paytables and rules, using the best setting for the player.</p>
-          </div>
-          <div className="t-card t-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>Game</th>
-                  <th>RTP</th>
-                  <th>Max</th>
-                  {THRESHOLDS.map((x) => (
-                    <th key={x}>{x}×+</th>
-                  ))}
-                  <th>Auto pace</th>
-                  <th>Source</th>
-                </tr>
-              </thead>
-              <tbody>
-                {SIM_GAMES.map((g) => (
-                  <tr key={g.id}>
-                    <td>
-                      <b>{g.name}</b>
-                    </td>
-                    <td>{Math.round(g.rtp * 100)}%</td>
-                    <td>{fmtX(g.maxMultiplier)}</td>
-                    {THRESHOLDS.map((x) => {
-                      const c = chanceAtLeast(g, x);
-                      return (
-                        <td key={x} className={c.p === 0 ? 'bad' : ''} title={c.setup}>
-                          {c.p === 0 ? 'never' : oneIn(c.p)}
-                        </td>
-                      );
-                    })}
-                    <td>{g.shared ? `${+(roundsPerHour(clock) / 60).toFixed(1)} rounds/min` : `${+(g.betsPerMin * FITTED_SPEED).toFixed(1)} bets/min`}</td>
-                    <td>
-                      {g.sources.slice(0, 1).map((s) => (
-                        <a key={s.url} href={s.url} target="_blank" rel="noreferrer">
-                          {s.label.split(':')[0]}
-                        </a>
-                      ))}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="t-muted t-small">
-            Keno and Plinko: exact from the paytable. Mines and Goal: exact from the grid rules (Goal tops out at 9.03×). Trader and Pilot Chicken: crash maths (97% ÷ X), an
-            estimate. Keno 80: no full paytable found, so its numbers are a best case. Auto paces are not published; ask product for the real seconds per auto round.
-          </p>
-        </section>
+        <details id="how" className="t-how">
+          <summary>How the time is worked out</summary>
+          <ul>
+            <li>
+              <b>Aviator and Trader</b> are played round by round, and every player sees the same rounds. Each round’s result uses Aviator’s provably-fair formula:
+              SHA-512 of the server seed and three client seeds, first 13 hex characters as h, crash = ⌊97 · 2⁵² ÷ (2⁵² − h)⌋ ÷ 100. Trader’s own formula is not public, so it
+              uses the same 97% curve, capped at 1,000×.
+            </li>
+            <li>
+              Rounds take about {meanRoundSec(DEFAULT_CLOCK).toFixed(0)} s ({Math.round(roundsPerHour(DEFAULT_CLOCK))} an hour). Players use both bet slots, so each good round
+              counts twice.
+            </li>
+            <li>The other games use their published paytables, played on auto at a pace fitted to the 5–11 Oct days.</li>
+          </ul>
+          <RoundChecker />
+        </details>
       </main>
     </>
   );
@@ -783,8 +669,9 @@ function OneTask({ settings, onAdd }: { settings: TimerSettings; onAdd: (m: SimM
   const p = m.kind === 'catch' && filled(m.threshold) ? missionChance(m, g) : null;
   let work = '';
   if (ok) {
-    const per = g.shared ? 'rounds' : 'bets';
-    const perBet = g.shared ? settings.betsPerRound : 1;
+    const shared = !!ROUND_GAMES[m.game];
+    const per = shared ? 'rounds' : 'bets';
+    const perBet = shared ? settings.betsPerRound : 1;
     let n = m.kind === 'bets' ? m.target / perBet : NaN;
     if (m.kind === 'catch' && p) n = Math.ceil(m.target / perBet) / p;
     if (m.kind === 'collect') {
@@ -834,7 +721,7 @@ function OneTask({ settings, onAdd }: { settings: TimerSettings; onAdd: (m: SimM
           <span>
             {!ok
               ? 'Fill in the numbers.'
-              : [p != null ? (p > 0 ? `${oneIn(p)} ${g.shared ? 'rounds' : 'bets'}` : 'impossible in this game') : '', work].filter(Boolean).join(' · ')}
+              : [p != null ? (p > 0 ? `${oneIn(p)} ${ROUND_GAMES[m.game] ? 'rounds' : 'bets'}` : 'impossible in this game') : '', work].filter(Boolean).join(' · ')}
           </span>
         </div>
         <button id="one-add" className="t-btn" disabled={!ok} onClick={() => onAdd(m)}>
@@ -845,3 +732,53 @@ function OneTask({ settings, onAdd }: { settings: TimerSettings; onAdd: (m: SimM
   );
 }
 
+
+/** Recomputes a finished Aviator round from the seeds in its fairness panel. */
+function RoundChecker() {
+  const [server, setServer] = useState('');
+  const [seeds, setSeeds] = useState(['', '', '']);
+  const [out, setOut] = useState<{ first13: string; crash: number } | null>(null);
+  const ready = server.trim() && seeds.every((x) => x.trim());
+  return (
+    <div className="t-check-round">
+      <b>Check a real Aviator round</b>
+      <p className="t-muted t-small">Paste the seeds from a finished round’s fairness panel. If the result matches the round, the formula above is confirmed.</p>
+      <div className="t-check-grid">
+        <input id="rc-server" aria-label="Server seed" placeholder="Server seed" value={server} onChange={(e) => setServer(e.target.value)} />
+        {seeds.map((v, i) => (
+          <input key={i} id={`rc-client-${i + 1}`} aria-label={`Client seed ${i + 1}`} placeholder={`Client seed ${i + 1}`} value={v} onChange={(e) => setSeeds(seeds.map((x, j) => (j === i ? e.target.value : x)))} />
+        ))}
+      </div>
+      <div className="t-row-between">
+        <button
+          id="rc-run"
+          className="t-btn"
+          disabled={!ready}
+          onClick={async () => {
+            try {
+              setOut(await verifyAviatorRound(server, seeds));
+            } catch {
+              setOut(null);
+            }
+          }}
+        >
+          Calculate result
+        </button>
+        <button
+          className="k-link"
+          onClick={() => {
+            setServer('DtpP8vUjdiMfn4dVbJt8bZhsdKT1qAz7iZCwXvZ0');
+            setSeeds(['txcgzPAhctu2f4GzBUID', 'ZPISstqQiNNshsfrm12F', 'HLfMXKrqj4TOGYla5wcL']);
+          }}
+        >
+          Fill an example
+        </button>
+        {out && (
+          <span className="t-mono-out">
+            {out.first13} → <b>{out.crash.toFixed(2)}×</b>
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}

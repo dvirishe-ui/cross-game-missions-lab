@@ -72,3 +72,14 @@ export function chanceAtLeastHits(need: number, x: number, minutes: number, c: A
   }
   return Math.max(0, 1 - below);
 }
+
+/**
+ * Trader: Spribe does not publish its round algorithm. What is known: all
+ * players share one chart (two bets per round, like Aviator), RTP is 97% and
+ * the maximum is 1,000×. An auto cash-out at X can only pay 97% for every X if
+ * the chart's peak follows the same 0.97 / X law, so the peak uses Aviator's
+ * formula capped at 1,000×. Round timing is assumed to match Aviator's
+ * (candles every ~2 s, similar climb); it is not published.
+ */
+export const TRADER_CLOCK: AviatorClock = { betSec: 5, pauseSec: 2, k: 0.065, rtp: 0.97 };
+export const TRADER_MAX = 1000;

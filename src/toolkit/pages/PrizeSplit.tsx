@@ -4,9 +4,11 @@
 
 import { useState } from 'react';
 import { Chip, Grid, NumberField, Section, TextField, useToolkit } from '../components/Fields';
-import { copyText, saveFile, slug } from '../model/exporting';
+import { copyText, saveFile, saveToGoogleSheets, slug } from '../model/exporting';
+import { buildXlsx, toBase64, XLSX_MIME } from '../model/xlsx';
+import { prizeWorkbook } from '../split/workbook';
 import { fmtMoney } from '../model/money';
-import { balanceToFirst, label, perWinner, rangeSize, splitStats, suggestSplit, toCsv, type PrizeRange, type SplitMode, type SplitState, type SplitStyle } from '../split/split';
+import { balanceToFirst, label, perWinner, rangeSize, splitStats, suggestSplit, type PrizeRange, type SplitMode, type SplitState, type SplitStyle } from '../split/split';
 
 const STYLES: { id: SplitStyle; label: string; hint: string }[] = [
   { id: 'balanced', label: 'Balanced', hint: 'Gradual decrease' },
@@ -21,6 +23,7 @@ const rid = () => Math.random().toString(36).slice(2, 9);
 export function PrizeSplit() {
   const { project: p, update } = useToolkit();
   const [note, setNote] = useState('');
+  const [sheet, setSheet] = useState<{ busy: boolean; url?: string | null; error?: string }>({ busy: false });
   const s: SplitState = p.split ?? {
     pool: p.prizes.totalPool,
     winners: p.prizes.winnersPerDay,
@@ -156,15 +159,43 @@ export function PrizeSplit() {
               Copy table
             </button>
             <button
-              className="t-btn ghost"
+              id="split-xlsx"
+              className="t-btn"
+              disabled={!s.ranges.length}
               onClick={async () => {
-                const r = await saveFile(`${slug(p.promo.name)}-prize-split.csv`, toCsv(s, money));
-                flash(r === 'saved' ? 'CSV saved.' : r === 'declined' ? 'Download cancelled.' : 'Download is not available here. Use Copy table.');
+                const r = await saveFile(`${slug(p.promo.name)}-prizes.xlsx`, buildXlsx(prizeWorkbook(p, s)), XLSX_MIME);
+                flash(r === 'saved' ? 'Excel file saved.' : r === 'declined' ? 'Download cancelled.' : 'Download is not available here. Use Copy table.');
               }}
             >
-              Export CSV
+              Download Excel
+            </button>
+            <button
+              id="split-gsheet"
+              className="t-btn"
+              disabled={!s.ranges.length || sheet.busy}
+              onClick={async () => {
+                setSheet({ busy: true });
+                const r = await saveToGoogleSheets(`${p.promo.name || 'Promotion'} — prizes`, toBase64(buildXlsx(prizeWorkbook(p, s))));
+                setSheet(r.ok ? { busy: false, url: r.url } : { busy: false, error: r.reason });
+              }}
+            >
+              {sheet.busy ? 'Saving…' : 'Save to Google Sheets'}
             </button>
             {note && <span className="t-ok-note">{note}</span>}
+          </div>
+          <div className="k-row">
+            {sheet.url !== undefined && !sheet.error && (
+              <span className="t-ok-note">
+                Created a Google Sheet in your Drive.{' '}
+                {sheet.url && (
+                  <a href={sheet.url} target="_blank" rel="noreferrer">
+                    Open it
+                  </a>
+                )}
+              </span>
+            )}
+            {sheet.error && <span className="k-small k-err">{sheet.error}</span>}
+            <span className="k-muted k-small">The workbook has the split and the daily prizes, with formulas so totals update when you edit.</span>
           </div>
         </Section>
       </div>

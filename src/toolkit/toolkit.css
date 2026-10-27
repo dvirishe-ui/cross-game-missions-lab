@@ -217,3 +217,5 @@ textarea[readonly] { opacity: 0.75; }
 
 .k-flash { outline: 3px solid var(--warn) !important; outline-offset: 2px; transition: outline-color 1.4s; }
 @media (prefers-reduced-motion: reduce) { .k-flash { transition: none; } }
+
+.k-err { color: var(--bad); }
