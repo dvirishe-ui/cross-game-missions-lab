@@ -236,6 +236,24 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
             <span className="t-muted t-small">Picks a target near the end and suggests tasks for it.</span>
           </div>
 
+          <div className="t-length" role="group" aria-label="How many winners">
+            <label className="t-length-label" htmlFor="prizes">
+              How many winners?
+            </label>
+            <div className="t-length-chips">
+              {[10, 50, 100, 500, 1000].map((n) => (
+                <button key={n} type="button" aria-pressed={winners === n} onClick={() => setPrizes(n)}>
+                  {n}
+                </button>
+              ))}
+              <span className="t-pair t-length-custom">
+                <span className="t-muted">or</span>
+                <input id="prizes" type="number" min={1} placeholder={String(DEFAULT_WINNERS)} aria-label="Number of winners" value={show(prizes)} onChange={(e) => setPrizes(num(e.target.value))} />
+              </span>
+            </div>
+            <span className="t-muted t-small">Optional. Blank means {DEFAULT_WINNERS}. The time shown is until the last winner finishes.</span>
+          </div>
+
           <div className="t-toolbar" role="toolbar" aria-label="Task sets">
             <button id="suggest" className="t-btn primary" onClick={suggest} disabled={busy}>
               Suggest for {target}
@@ -339,17 +357,6 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
                     <span className="t-muted">±</span>
                     <input id="tol" type="number" min={5} max={120} step={5} value={show(tol)} onChange={(e) => setTol(num(e.target.value))} />
                     <span className="t-muted">min</span>
-                  </span>
-                </label>
-                <label>
-                  <span>Winners (optional)</span>
-                  <span className="t-pair">
-                    <input id="prizes" type="number" min={1} placeholder={String(DEFAULT_WINNERS)} value={show(prizes)} onChange={(e) => setPrizes(num(e.target.value))} />
-                    {[10, 50, 100, 500, 1000].map((n) => (
-                      <button key={n} type="button" className={`t-mini ${winners === n ? 'on' : ''}`} onClick={() => setPrizes(n)}>
-                        {n}
-                      </button>
-                    ))}
                   </span>
                 </label>
                 <fieldset>
