@@ -9,6 +9,16 @@ import type { FitDay } from './model';
  */
 export const AUTO_PLAYERS = 100;
 
+/**
+ * Players on auto for a given number of winners. Real days had about three
+ * players who started for every winner; the pool is at least twice the
+ * winners, so the last prize never waits for the very slowest player.
+ */
+export const playersFor = (winners: number) => Math.max(AUTO_PLAYERS, Math.ceil(winners * 2));
+
+/** Fewer simulated days for very large pools, to keep the page quick. */
+export const runsFor = (winners: number, base: number) => (winners > 2000 ? Math.round(base / 4) : winners > 500 ? Math.round(base / 2) : base);
+
 /** Days with 50 winners: the reported duration is when the last prize went. */
 export const FIT_DAYS: FitDay[] = DAY_RESULTS.filter((r) => r.winners > 0).map((r) => ({
   day: r.day,

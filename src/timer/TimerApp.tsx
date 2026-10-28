@@ -6,7 +6,7 @@ import { SIM_GAMES, chanceAtLeast, oneIn } from '../sim/games';
 import { simMissionsForDay } from '../sim/days';
 import { DEFAULT_CLOCK, chanceAtLeastHits, meanRoundSec, roundsPerHour } from './clock';
 import { verifyAviatorRound } from './provablyFair';
-import { AUTO_PLAYERS, FITTED_SPEED, FIT_DAYS } from './days';
+import { FITTED_SPEED, FIT_DAYS, playersFor, runsFor } from './days';
 import { randomSet, suggestedSet } from './generate';
 import { goneByCurve, ROUND_GAMES, simulateDay, suggestTarget, type Suggestion, type TimerResult, type TimerSettings } from './model';
 import type { CalcState } from '../toolkit/model/project';
@@ -93,7 +93,7 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
   const winners = filled(prizes) ? Math.floor(prizes) : DEFAULT_WINNERS;
   const ready = missions.length > 0 && missions.every(taskReady) && Number.isFinite(tol) && targetMin > 0;
   const settings: TimerSettings = useMemo(
-    () => ({ players: Math.max(AUTO_PLAYERS, winners), prizes: winners, windowMin, betsPerRound: bets, clock, speed: FITTED_SPEED, spread: 0, runs: 300, seed: 7 }),
+    () => ({ players: playersFor(winners), prizes: winners, windowMin, betsPerRound: bets, clock, speed: FITTED_SPEED, spread: 0, runs: runsFor(winners, 300), seed: 7 }),
     [winners, bets, clock, windowMin],
   );
   // Simulate past the end of the challenge so there is always a time to show.
@@ -345,7 +345,7 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
                   <span>Winners (optional)</span>
                   <span className="t-pair">
                     <input id="prizes" type="number" min={1} placeholder={String(DEFAULT_WINNERS)} value={show(prizes)} onChange={(e) => setPrizes(num(e.target.value))} />
-                    {[10, 50, 100, 500].map((n) => (
+                    {[10, 50, 100, 500, 1000].map((n) => (
                       <button key={n} type="button" className={`t-mini ${winners === n ? 'on' : ''}`} onClick={() => setPrizes(n)}>
                         {n}
                       </button>
@@ -674,8 +674,8 @@ function OneTask({ settings, onAdd }: { settings: TimerSettings; onAdd: (m: SimM
   useEffect(() => {
     if (!ok) return setTime(null);
     const t = setTimeout(() => {
-      const players = n === 1 ? 1 : Math.max(AUTO_PLAYERS, n);
-      const r = simulateDay([m], GAMES, { ...settings, players, prizes: n, runs: 200, windowMin: ONE_TASK_HORIZON }, ONE_TASK_HORIZON);
+      const players = n === 1 ? 1 : playersFor(n);
+      const r = simulateDay([m], GAMES, { ...settings, players, prizes: n, runs: runsFor(n, 200), windowMin: ONE_TASK_HORIZON }, ONE_TASK_HORIZON);
       setTime(r.median);
     }, 60);
     return () => clearTimeout(t);

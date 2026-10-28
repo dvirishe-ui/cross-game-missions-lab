@@ -4,7 +4,7 @@
 import { gameMap } from '../../sim/engine';
 import { SIM_GAMES } from '../../sim/games';
 import { DEFAULT_CLOCK } from '../../timer/clock';
-import { AUTO_PLAYERS, FITTED_SPEED } from '../../timer/days';
+import { FITTED_SPEED, playersFor, runsFor } from '../../timer/days';
 import { simulateDay } from '../../timer/model';
 import { dayWindowMin, dayWinners } from './campaign';
 import { tasksKey, type DayConfig, type Estimate, type Project } from './project';
@@ -28,14 +28,14 @@ export function estimateDay(p: Project, d: DayConfig, bets: 1 | 2 = p.calculator
   const windowMin = dayWindowMin(p, d)!;
   const prizes = dayWinners(p, d)!;
   const r = simulateDay(d.tasks, GAMES, {
-    players: Math.max(AUTO_PLAYERS, prizes),
+    players: playersFor(prizes),
     prizes,
     windowMin,
     betsPerRound: bets,
     clock: DEFAULT_CLOCK,
     speed: FITTED_SPEED,
     spread: 0,
-    runs: 150,
+    runs: runsFor(prizes, 150),
     seed: 7,
   });
   return { median: finite(r.median), perTask: r.missionNthMedian.map(finite), pAllGone: r.pAllGone, windowMin, key: tasksKey(d.tasks) };
