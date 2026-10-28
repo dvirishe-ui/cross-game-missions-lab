@@ -49,6 +49,10 @@ const show = (v: number | undefined) => (v != null && Number.isFinite(v) ? v : '
 const filled = (v: number | undefined) => v != null && Number.isFinite(v) && v >= 1;
 const q = (v: number | undefined) => (filled(v) ? v : '?');
 
+const DEFAULT_WINNERS = 50;
+/** Share of simulated days on which every prize went within the challenge. */
+const shareWithin = (r: TimerResult, w: number) => r.runs.filter((x) => x.lastPrize != null && x.lastPrize <= w).length / r.runs.length;
+
 function describe(m: SimMission): string {
   const n = GAMES[m.game].name;
   if (m.kind === 'catch') return `${n}: catch ${q(m.threshold)}× or more ${q(m.target)} times`;
@@ -59,7 +63,7 @@ function describe(m: SimMission): string {
 const taskReady = (m: SimMission) => filled(m.target) && (m.kind !== 'catch' || filled(m.threshold));
 
 type Verdict = 'early' | 'ontime' | 'late' | 'left';
-const VERDICT_TEXT: Record<Verdict, string> = { early: 'Too early', ontime: 'On time', late: 'Late', left: 'Prizes left over' };
+const VERDICT_TEXT: Record<Verdict, string> = { early: 'Too early', ontime: 'On time', late: 'Late', left: 'Longer than the challenge' };
 
 export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
   const init = bridge?.initial ?? null;
@@ -85,32 +89,36 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
   const [backtest, setBacktest] = useState<{ day: number; reported: number; r: TimerResult }[]>([]);
   const beforeRef = useRef<HTMLElement>(null);
 
-  const ready = missions.length > 0 && missions.every(taskReady) && filled(prizes) && Number.isFinite(tol) && targetMin > 0;
+  /** Winners are optional: a blank box means the usual 50. */
+  const winners = filled(prizes) ? Math.floor(prizes) : DEFAULT_WINNERS;
+  const ready = missions.length > 0 && missions.every(taskReady) && Number.isFinite(tol) && targetMin > 0;
   const settings: TimerSettings = useMemo(
-    () => ({ players: Math.max(AUTO_PLAYERS, filled(prizes) ? prizes : 0), prizes, windowMin, betsPerRound: bets, clock, speed: FITTED_SPEED, spread: 0, runs: 300, seed: 7 }),
-    [prizes, bets, clock, windowMin],
+    () => ({ players: Math.max(AUTO_PLAYERS, winners), prizes: winners, windowMin, betsPerRound: bets, clock, speed: FITTED_SPEED, spread: 0, runs: 300, seed: 7 }),
+    [winners, bets, clock, windowMin],
   );
+  // Simulate past the end of the challenge so there is always a time to show.
+  const horizon = Math.min(4320, Math.max(windowMin * 3, 600));
 
-  const calcState: CalcState = { missions, windowMin, targetMin, tol, prizes, bets, source, dayId };
+  const calcState: CalcState = { missions, windowMin, targetMin, tol, prizes: winners, bets, source, dayId };
   const bridgeRef = useRef(bridge);
   bridgeRef.current = bridge;
   useEffect(() => {
     bridgeRef.current?.onChange(calcState);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [missions, windowMin, targetMin, tol, prizes, bets, source, dayId]);
+  }, [missions, windowMin, targetMin, tol, winners, bets, source, dayId]);
 
   useEffect(() => {
     setBusy(true);
     setSuggestion(null);
     const t = setTimeout(() => {
-      const r = ready ? simulateDay(missions, GAMES, settings) : null;
+      const r = ready ? simulateDay(missions, GAMES, settings, horizon) : null;
       setResult(r);
       setBusy(false);
-      if (r) bridgeRef.current?.onResult(calcState, r);
+      if (r) bridgeRef.current?.onResult(calcState, { ...r, pAllGone: shareWithin(r, windowMin) });
     }, 60);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [missions, settings, ready]);
+  }, [missions, settings, ready, horizon]);
 
   useEffect(() => {
     if (!showBefore) return;
@@ -161,14 +169,14 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
   };
 
   let verdict: Verdict | null = null;
+  const pInWindow = result ? shareWithin(result, windowMin) : 0;
   if (ready && result) {
-    if (result.pAllGone < 0.5) verdict = 'left';
+    if (!(result.median <= windowMin)) verdict = 'left';
     else if (result.median < targetMin - tol) verdict = 'early';
     else if (result.median > targetMin + tol) verdict = 'late';
     else verdict = 'ontime';
   }
   const inBand = result ? result.runs.filter((r) => r.lastPrize != null && Math.abs(r.lastPrize - targetMin) <= tol).length / result.runs.length : 0;
-  const avgWinners = result ? result.runs.reduce((a, r) => a + r.winners, 0) / result.runs.length : 0;
   const slow = result ? missions[result.slowest] : null;
 
   const findFix = () => {
@@ -334,8 +342,15 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
                   </span>
                 </label>
                 <label>
-                  <span>Prizes</span>
-                  <input id="prizes" type="number" min={1} value={show(prizes)} onChange={(e) => setPrizes(num(e.target.value))} />
+                  <span>Winners (optional)</span>
+                  <span className="t-pair">
+                    <input id="prizes" type="number" min={1} placeholder={String(DEFAULT_WINNERS)} value={show(prizes)} onChange={(e) => setPrizes(num(e.target.value))} />
+                    {[10, 50, 100, 500].map((n) => (
+                      <button key={n} type="button" className={`t-mini ${winners === n ? 'on' : ''}`} onClick={() => setPrizes(n)}>
+                        {n}
+                      </button>
+                    ))}
+                  </span>
                 </label>
                 <fieldset>
                   <legend>Aviator bets a round</legend>
@@ -352,15 +367,13 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
 
             <aside className={`t-verdict ${verdict ?? ''}`} aria-live="polite">
               <span className="t-chip">{!ready ? 'Waiting for numbers' : busy ? 'Calculating…' : verdict ? VERDICT_TEXT[verdict] : '—'}</span>
-              <p className="t-big">{!ready || !result ? '?' : verdict === 'left' ? `${Math.round(avgWinners)}/${prizes}` : dur(result.median)}</p>
+              <p className="t-big">{!ready || !result ? '?' : Number.isFinite(result.median) ? dur(result.median) : `> ${dur(horizon)}`}</p>
               <p className="t-big-cap">
                 {!ready
                   ? missions.length
                     ? 'Fill in every number to see when the last prize goes.'
                     : 'Add a task, or press Suggested or Random.'
-                  : verdict === 'left'
-                    ? `prizes won in ${dur(windowMin)}, typical day`
-                    : 'until the last prize goes, typical day'}
+                  : `until the last of ${winners} winners finishes, typical day`}
               </p>
               <p className="t-sub">
                 {ready && result && verdict !== 'left' && (
@@ -370,7 +383,7 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
                     {verdict === 'ontime' && `Within ${dur(tol)} of ${target}.`}
                   </>
                 )}
-                {ready && result && verdict === 'left' && 'A task is too hard to finish in the window.'}
+                {ready && result && verdict === 'left' && (Number.isFinite(result.median) ? `${dur(result.median - windowMin)} longer than the ${dur(windowMin)} challenge, so prizes are left over on most days.` : `Far longer than the ${dur(windowMin)} challenge: a task is too hard.`)}
               </p>
               <dl className="t-facts">
                 <div>
@@ -378,8 +391,8 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
                   <dd>{ready && result ? `${Math.round(inBand * 100)}%` : '?'}</dd>
                 </div>
                 <div>
-                  <dt>All prizes go within {dur(windowMin)}</dt>
-                  <dd>{ready && result ? `${Math.round(result.pAllGone * 100)}%` : '?'}</dd>
+                  <dt>All {winners} prizes go within {dur(windowMin)}</dt>
+                  <dd>{ready && result ? `${Math.round(pInWindow * 100)}%` : '?'}</dd>
                 </div>
                 <div className="wide">
                   <dt>Decided by</dt>
@@ -396,7 +409,7 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
                 <span className="t-muted t-small">300 simulated days</span>
               </div>
               <GoneChart result={result} targetMin={targetMin} tol={tol} windowMin={windowMin} />
-              <h3>Each mission: when the {prizes}th player finishes it</h3>
+              <h3>Each mission: when winner #{winners} finishes it</h3>
               <TaskBars missions={missions} result={result} targetMin={targetMin} windowMin={windowMin} />
               <div className="t-fix">
                 <p>
@@ -653,17 +666,20 @@ const ONE_TASK_HORIZON = 48 * 60;
 function OneTask({ settings, onAdd }: { settings: TimerSettings; onAdd: (m: SimMission) => void }) {
   const [m, setM] = useState<SimMission>({ game: 'plinko', kind: 'catch', threshold: 15, target: 20 });
   const [time, setTime] = useState<number | null>(null);
+  const [oneWinners, setOneWinners] = useState(NaN);
+  const n = filled(oneWinners) ? Math.floor(oneWinners) : 1;
   const ok = taskReady(m);
   const g = GAMES[m.game];
 
   useEffect(() => {
     if (!ok) return setTime(null);
     const t = setTimeout(() => {
-      const r = simulateDay([m], GAMES, { ...settings, players: 1, prizes: 1, runs: 200, windowMin: ONE_TASK_HORIZON }, ONE_TASK_HORIZON);
+      const players = n === 1 ? 1 : Math.max(AUTO_PLAYERS, n);
+      const r = simulateDay([m], GAMES, { ...settings, players, prizes: n, runs: 200, windowMin: ONE_TASK_HORIZON }, ONE_TASK_HORIZON);
       setTime(r.median);
     }, 60);
     return () => clearTimeout(t);
-  }, [m, settings, ok]);
+  }, [m, settings, ok, n]);
 
   const set = (patch: Partial<SimMission>) => setM({ ...m, ...patch });
   const p = m.kind === 'catch' && filled(m.threshold) ? missionChance(m, g) : null;
@@ -672,20 +688,20 @@ function OneTask({ settings, onAdd }: { settings: TimerSettings; onAdd: (m: SimM
     const shared = !!ROUND_GAMES[m.game];
     const per = shared ? 'rounds' : 'bets';
     const perBet = shared ? settings.betsPerRound : 1;
-    let n = m.kind === 'bets' ? m.target / perBet : NaN;
-    if (m.kind === 'catch' && p) n = Math.ceil(m.target / perBet) / p;
+    let need = m.kind === 'bets' ? m.target / perBet : NaN;
+    if (m.kind === 'catch' && p) need = Math.ceil(m.target / perBet) / p;
     if (m.kind === 'collect') {
       const c = chanceAtLeast(g, 2);
-      n = c.p > 0 ? Math.ceil(m.target / c.pays / perBet) / c.p : NaN;
+      need = c.p > 0 ? Math.ceil(m.target / c.pays / perBet) / c.p : NaN;
     }
-    if (Number.isFinite(n)) work = `about ${Math.round(n).toLocaleString('en-US')} ${per}`;
+    if (Number.isFinite(need)) work = `about ${Math.round(need).toLocaleString('en-US')} ${per} each`;
   }
 
   return (
     <div className="t-card t-one">
       <div className="t-head">
         <h3>Check one task</h3>
-        <p className="t-muted t-small">How long a single task takes one player on auto, on its own.</p>
+        <p className="t-muted t-small">How long a single task takes on auto, on its own. Add a number of winners to see when the last of them finishes.</p>
       </div>
       <div className="t-one-grid">
         <div className="t-task">
@@ -715,9 +731,14 @@ function OneTask({ settings, onAdd }: { settings: TimerSettings; onAdd: (m: SimM
             {m.kind === 'catch' ? 'times' : m.kind === 'collect' ? 'total ×' : 'bets'}
             <input id="one-n" type="number" min={1} value={show(m.target)} onChange={(e) => set({ target: num(e.target.value) })} />
           </label>
+          <label className="t-inline">
+            winners
+            <input id="one-winners" type="number" min={1} placeholder="1" value={show(oneWinners)} onChange={(e) => setOneWinners(num(e.target.value))} />
+          </label>
         </div>
         <div className="t-one-result" aria-live="polite">
           <b>{!ok ? '?' : time == null ? '…' : Number.isFinite(time) ? dur(time) : 'over 48h'}</b>
+          <span>{n === 1 ? 'for one player' : `until the last of ${n} winners finishes`}</span>
           <span>
             {!ok
               ? 'Fill in the numbers.'
