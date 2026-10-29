@@ -118,6 +118,7 @@ export default function ToolkitApp() {
         days: plan.map((tasks, i) => ({ ...(p.days[i] ?? blankDay()), tasks: tasks.map((t) => ({ ...t })) })),
       })),
     history: pastEstimates,
+    marketHint: project.eligibility.markets,
     onSaveToDay: (dayId, missions) =>
       update((p) =>
         dayId === 'new'

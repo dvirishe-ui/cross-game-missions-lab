@@ -250,3 +250,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .t-plan [role='tab'] { display: flex; flex-direction: column; align-items: flex-start; gap: 0; padding: 5px 10px; }
 .t-plan [role='tab'] small { font-family: var(--font-mono); font-size: 0.7rem; color: var(--muted); }
 .t-plan [role='tab'][aria-selected='true'] { background: var(--accent-soft); border-color: var(--accent); }
+
+.t-length select#market { width: auto; max-width: 220px; }
+.t-rank { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; font-size: 0.82rem; color: var(--muted); }
+.t-rank span.in { color: var(--fg); font-weight: 600; }
+.t-rank span.out { color: var(--muted); font-style: italic; }

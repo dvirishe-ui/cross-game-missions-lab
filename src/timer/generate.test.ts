@@ -29,3 +29,23 @@ describe('task sets', () => {
       for (const m of randomSet(seed, games)) if (m.kind === 'catch') expect(chanceAtLeast(games[m.game], m.threshold!).p).toBeGreaterThanOrEqual(1 / 2000);
   });
 });
+
+describe('market-aware suggestions', () => {
+  it('keeps only games the calculator can time, in the country order', async () => {
+    const { marketGames } = await import('./generate');
+    const { GAME_RANKING } = await import('../data/gameRanking');
+    expect(marketGames(GAME_RANKING.Kenya)).toEqual(['aviator', 'plinko', 'trader', 'pilot-chicken', 'goal', 'keno', 'mines']);
+    expect(Object.keys(GAME_RANKING)).toHaveLength(230);
+  });
+  it('favours the top games of the market across many days', async () => {
+    const { marketGames, variedSet } = await import('./generate');
+    const { GAME_RANKING } = await import('../data/gameRanking');
+    const market = marketGames(GAME_RANKING.Nigeria);
+    const count: Record<string, number> = {};
+    for (let seed = 1; seed <= 200; seed++) for (const m of variedSet(240, 4, seed, games, 1.4, DEFAULT_CLOCK, 2, market)) count[m.game] = (count[m.game] ?? 0) + 1;
+    // Nigeria: aviator, mines, plinko, keno, goal, pilot-chicken, trader.
+    expect(count.aviator).toBeGreaterThan(180); // Aviator (rank 1) sets the time on most days; Trader on some
+    expect(count.mines).toBeGreaterThan(count.trader ?? 0);
+    expect(count.plinko).toBeGreaterThan(count.trader ?? 0);
+  });
+});

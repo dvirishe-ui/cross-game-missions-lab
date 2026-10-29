@@ -58,6 +58,8 @@ export interface CalcState {
   activeDay?: number;
   planDays?: number;
   tasksPerDay?: number;
+  /** Market whose most-played games the suggestions favour. */
+  country?: string;
 }
 
 export interface Estimate {

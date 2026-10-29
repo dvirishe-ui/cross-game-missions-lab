@@ -7,7 +7,8 @@ import { simMissionsForDay } from '../sim/days';
 import { DEFAULT_CLOCK, chanceAtLeastHits, meanRoundSec, roundsPerHour } from './clock';
 import { verifyAviatorRound } from './provablyFair';
 import { FITTED_SPEED, FIT_DAYS, playersFor, runsFor } from './days';
-import { randomTimedSet, suggestedSet, variedSet } from './generate';
+import { marketGames, randomTimedSet, suggestedSet, variedSet } from './generate';
+import { GAME_RANKING } from '../data/gameRanking';
 import { goneByCurve, ROUND_GAMES, simulateDay, suggestTarget, tuneToTarget, type Suggestion, type TimerResult, type TimerSettings } from './model';
 import type { CalcState } from '../toolkit/model/project';
 
@@ -22,6 +23,8 @@ export interface CalcBridge {
   onSavePlan?: (plan: SimMission[][], tasksPerDay: number) => void;
   /** Days from saved projects with a duration estimate, to compare with. */
   history?: PastDay[];
+  /** The project's eligible markets, to preselect a country. */
+  marketHint?: string;
 }
 
 /** A past (or estimated) challenge day to compare a target time with. */
@@ -33,6 +36,11 @@ export interface PastDay {
 }
 
 /** The 5–11 Oct days with their real last-prize times. */
+const COUNTRIES = Object.keys(GAME_RANKING);
+/** A country named in free text such as "Nigeria" or "Nigeria, Ghana". */
+const countryIn = (text = '') => COUNTRIES.find((c) => text.toLowerCase().split(/[,;/]| and /).some((part) => part.trim() === c.toLowerCase())) ?? '';
+const gameLabel = (id: string) => GAMES[id]?.name ?? id.split('-').map((w) => (w === 'lo' ? 'Lo' : w[0].toUpperCase() + w.slice(1))).join(id.startsWith('hi-') ? '-' : ' ');
+
 const REAL_PAST: PastDay[] = DAY_RESULTS.filter((r) => r.winners > 0).map((r) => ({
   label: `Day ${r.day} of the 5–11 Oct challenge`,
   minutes: r.durationMin,
@@ -102,6 +110,9 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
   const [activeDay, setActiveDay] = useState(init?.activeDay ?? 0);
   const [planTimes, setPlanTimes] = useState<Record<number, number>>({});
   const [presses, setPresses] = useState(0);
+  const [country, setCountry] = useState(init?.country ?? countryIn(bridge?.marketHint));
+  const ranking = country ? GAME_RANKING[country] : undefined;
+  const market = ranking ? marketGames(ranking) : undefined;
   const clock = DEFAULT_CLOCK;
   const targetMin = (Number.isFinite(targetH) ? targetH : 0) * 60 + (Number.isFinite(targetM) ? targetM : 0);
   const target = dur(targetMin);
@@ -125,13 +136,13 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
   // Simulate past the end of the challenge so there is always a time to show.
   const horizon = Math.min(4320, Math.max(windowMin * 3, 600));
 
-  const calcState: CalcState = { missions, windowMin, targetMin, tol, prizes: winners, bets, source, dayId, plan, activeDay, planDays, tasksPerDay };
+  const calcState: CalcState = { missions, windowMin, targetMin, tol, prizes: winners, bets, source, dayId, plan, activeDay, planDays, tasksPerDay, country };
   const bridgeRef = useRef(bridge);
   bridgeRef.current = bridge;
   useEffect(() => {
     bridgeRef.current?.onChange(calcState);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [missions, windowMin, targetMin, tol, winners, bets, source, dayId, plan, activeDay, planDays, tasksPerDay]);
+  }, [missions, windowMin, targetMin, tol, winners, bets, source, dayId, plan, activeDay, planDays, tasksPerDay, country]);
 
   useEffect(() => {
     setBusy(true);
@@ -180,10 +191,10 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
       const days = Array.from({ length: n }, (_, d) => {
         const seed = base + d * 7919;
         return kind === 'suggest'
-          ? tuneToTarget(variedSet(goal, per, seed, GAMES, FITTED_SPEED, clock, bets), GAMES, s, goal, 0)
-          : tuneToTarget(randomTimedSet(goal, per, seed, GAMES, FITTED_SPEED, clock, bets), GAMES, s, goal);
+          ? tuneToTarget(variedSet(goal, per, seed, GAMES, FITTED_SPEED, clock, bets, market), GAMES, s, goal, 0)
+          : tuneToTarget(randomTimedSet(goal, per, seed, GAMES, FITTED_SPEED, clock, bets, market), GAMES, s, goal);
       });
-      const what = kind === 'suggest' ? 'Suggested' : 'Random';
+      const what = `${kind === 'suggest' ? 'Suggested' : 'Random'}${country ? ` for ${country}` : ''}`;
       setPlanTimes({});
       if (n > 1) {
         setPlan(days);
@@ -338,6 +349,33 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
               <input id="plan-tasks" type="number" min={1} max={12} aria-label="Tasks per day" value={show(tasksPerDay)} onChange={(e) => setTasksPerDay(num(e.target.value))} />
             </div>
             <span className="t-muted t-small">Suggest and Random build every day, each different, each aimed at {target}. Press again for another option.</span>
+          </div>
+
+          <div className="t-length" role="group" aria-label="Market">
+            <label className="t-length-label" htmlFor="market">
+              Which market?
+            </label>
+            <select id="market" value={country} onChange={(e) => setCountry(e.target.value)}>
+              <option value="">Any market</option>
+              {COUNTRIES.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+            {ranking ? (
+              <span className="t-rank">
+                Most played there:{' '}
+                {ranking.slice(0, 8).map((g, i) => (
+                  <span key={g} className={GAMES[g] && (marketGames(ranking) as string[]).includes(g) ? 'in' : 'out'} title={GAMES[g] ? 'Used in suggestions' : 'Not in the calculator yet'}>
+                    {i + 1}. {gameLabel(g)}
+                  </span>
+                ))}
+                <em className="t-small">· bold = used in suggestions, italic = not in the calculator yet</em>
+              </span>
+            ) : (
+              <span className="t-muted t-small">Optional. Pick a country and suggestions use the games most played there (from the games ranking by country).</span>
+            )}
           </div>
 
           <div className="t-past" aria-live="polite">
