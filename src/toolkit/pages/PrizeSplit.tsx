@@ -8,12 +8,15 @@ import { copyText, saveFile, saveToGoogleSheets, slug } from '../model/exporting
 import { buildXlsx, toBase64, XLSX_MIME } from '../model/xlsx';
 import { prizeWorkbook } from '../split/workbook';
 import { fmtMoney } from '../model/money';
-import { balanceToFirst, label, perWinner, rangeSize, splitStats, suggestSplit, type PrizeRange, type SplitMode, type SplitState, type SplitStyle } from '../split/split';
+import { balanceToFirst, growingDailyRewards, label, perWinner, rangeSize, splitStats, suggestSplit, type GrowthMode, type PrizeRange, type SplitMode, type SplitState, type SplitStyle } from '../split/split';
+import { blankDay, type DayConfig } from '../model/project';
+import { dayWinners } from '../model/campaign';
 
 const STYLES: { id: SplitStyle; label: string; hint: string }[] = [
   { id: 'balanced', label: 'Balanced', hint: 'Gradual decrease' },
   { id: 'top-heavy', label: 'Top heavy', hint: 'Big top 3 / top 10' },
   { id: 'flat', label: 'Flat', hint: 'Close to equal' },
+  { id: 'equal', label: 'Equal', hint: 'Everyone gets the same' },
   { id: 'custom', label: 'Custom', hint: 'Edit every row' },
 ];
 
@@ -60,6 +63,7 @@ export function PrizeSplit() {
   return (
     <div className="k-two">
       <div className="k-forms">
+        <DailyGrowthSection />
         <Section title="Prize pool">
           <Grid cols={3}>
             <NumberField id="split-pool" label="Total prize pool" min={0} value={s.pool} onChange={(pool) => regenerate(s.style, pool, s.winners)} />
@@ -277,5 +281,107 @@ function NumCell({ value, onChange, label: aria, min }: { value: number; onChang
       }}
       onBlur={() => setTxt(null)}
     />
+  );
+}
+
+/** Daily rewards that rise every day, filling the campaign's daily prizes. */
+function DailyGrowthSection() {
+  const { project: p, update } = useToolkit();
+  const [pool, setPool] = useState<number | null>(p.prizes.totalPool);
+  const [days, setDays] = useState<number | null>(p.days.length || p.promo.declaredDays || 7);
+  const [winners, setWinners] = useState<number | null>(p.prizes.winnersPerDay ?? 50);
+  const [mode, setMode] = useState<GrowthMode>('steps');
+  const [factor, setFactor] = useState<number | null>(2.5);
+  const [msg, setMsg] = useState('');
+  const n = Math.max(0, Math.min(60, Math.floor(days ?? 0)));
+  // Days that already exist keep their own winner counts.
+  const perDay = Array.from({ length: n }, (_, i) => (p.days[i] ? dayWinners(p, p.days[i]) : null) ?? winners ?? 0);
+  const g = pool && n && perDay.every((w) => w >= 1) && factor != null ? growingDailyRewards(pool, perDay, mode, factor) : null;
+  const money = (v: number) => fmtMoney(v, p.prizes.currency || 'USD');
+  return (
+    <Section title="Daily rewards that grow every day" note="Each day pays more per winner than the day before">
+      <Grid cols={4}>
+        <NumberField id="grow-pool" label="Total prize pool" min={0} value={pool} onChange={setPool} />
+        <NumberField id="grow-days" label="Days" min={1} value={days} onChange={setDays} />
+        <NumberField id="grow-winners" label="Winners per day" min={1} value={winners} onChange={setWinners} hint={p.days.length ? 'Existing days keep their own count' : undefined} />
+        <div className="k-field">
+          <span>How it grows</span>
+          <div className="k-seg" role="group" aria-label="Growth">
+            <button type="button" aria-pressed={mode === 'steps'} onClick={() => (setMode('steps'), setFactor(2.5))}>
+              Even steps
+            </button>
+            <button type="button" aria-pressed={mode === 'percent'} onClick={() => (setMode('percent'), setFactor(15))}>
+              Same %
+            </button>
+          </div>
+        </div>
+        <NumberField
+          id="grow-factor"
+          label={mode === 'steps' ? 'Last day pays × the first' : 'Increase each day'}
+          suffix={mode === 'steps' ? '×' : '%'}
+          min={mode === 'steps' ? 1 : 0}
+          step={mode === 'steps' ? 0.1 : 1}
+          value={factor}
+          onChange={setFactor}
+        />
+      </Grid>
+      {g && (
+        <>
+          <div className="k-tablewrap">
+            <table className="k-table">
+              <thead>
+                <tr>
+                  <th>Day</th>
+                  <th className="num">Winners</th>
+                  <th className="num">Per winner</th>
+                  <th className="num">Day pool</th>
+                  <th aria-label="Bar" />
+                </tr>
+              </thead>
+              <tbody>
+                {g.rewards.map((r, i) => (
+                  <tr key={i}>
+                    <td>Day {i + 1}</td>
+                    <td className="num">{perDay[i]}</td>
+                    <td className="num">{money(r)}</td>
+                    <td className="num">{money(r * perDay[i])}</td>
+                    <td className="k-barcell">
+                      <i style={{ width: `${(r / g.rewards[g.rewards.length - 1]) * 100}%` }} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="k-row">
+            <span className={g.remaining === 0 ? 't-ok-note' : 'k-err k-small'}>
+              {g.remaining === 0 ? `Adds up to ${money(g.allocated)}.` : `${money(g.remaining)} cannot be split into whole amounts; adjust the pool or winners.`}
+            </span>
+            <button
+              id="grow-apply"
+              className="t-btn primary"
+              onClick={() => {
+                update((x) => ({
+                  ...x,
+                  prizes: {
+                    ...x.prizes,
+                    totalPool: x.prizes.totalPool ?? pool,
+                    winnersPerDay: x.prizes.winnersPerDay ?? winners,
+                    rewardStructure: x.prizes.rewardStructure || 'Progressive Reward Structure',
+                    structureSource: 'daily',
+                  },
+                  days: [...Array.from({ length: n }, (_, i): DayConfig => ({ ...(x.days[i] ?? blankDay()), reward: g.rewards[i] })), ...x.days.slice(n)],
+                }));
+                setMsg(`Daily rewards set for ${n} days.`);
+                setTimeout(() => setMsg(''), 4000);
+              }}
+            >
+              Use for the campaign’s days
+            </button>
+            {msg && <span className="t-ok-note">{msg}</span>}
+          </div>
+        </>
+      )}
+    </Section>
   );
 }

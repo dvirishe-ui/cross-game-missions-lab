@@ -277,3 +277,28 @@ describe('timeline ids', () => {
     expect(defaultMilestones('cross-game-mission').map((m) => m.id)).toEqual(defaultMilestones('cross-game-mission').map((m) => m.id));
   });
 });
+
+describe('equal split and growing days', () => {
+  it('equal split gives everyone the same and adds up exactly', async () => {
+    const { equalSplit, splitStats } = await import('./split/split');
+    const s = (pool: number, winners: number) => ({ pool, winners, currency: 'USD', style: 'equal' as const, mode: 'fixed' as const, ranges: equalSplit(pool, winners) });
+    expect(equalSplit(10000, 100)).toMatchObject([{ from: 1, to: 100, amount: 100 }]);
+    expect(splitStats(s(10000, 100)).remaining).toBe(0);
+    const odd = s(1000, 3);
+    expect(splitStats(odd).remaining).toBe(0);
+    expect(odd.ranges.map((r) => r.amount)).toEqual([333.34, 333.33]);
+  });
+  it('daily rewards grow every day and add up to the pool', async () => {
+    const { growingDailyRewards } = await import('./split/split');
+    for (const [mode, f] of [['steps', 2.6], ['percent', 15], ['steps', 1]] as const) {
+      const g = growingDailyRewards(15000, [50, 50, 50, 50, 50, 50, 50], mode, f);
+      for (let i = 1; i < 7; i++) expect(g.rewards[i]).toBeGreaterThan(g.rewards[i - 1]);
+      expect(g.allocated + g.remaining).toBe(15000);
+      expect(g.remaining).toBe(0);
+    }
+    const mixed = growingDailyRewards(10000, [20, 50, 100], 'steps', 3);
+    expect(mixed.rewards[0]).toBeLessThan(mixed.rewards[1]);
+    expect(mixed.rewards[1]).toBeLessThan(mixed.rewards[2]);
+    expect(mixed.remaining).toBeGreaterThanOrEqual(0);
+  });
+});

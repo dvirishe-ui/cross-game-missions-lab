@@ -3,7 +3,7 @@
 
 import { cents } from '../model/money';
 
-export type SplitStyle = 'balanced' | 'top-heavy' | 'flat' | 'custom';
+export type SplitStyle = 'balanced' | 'top-heavy' | 'flat' | 'equal' | 'custom';
 export type SplitMode = 'fixed' | 'percent';
 
 /** Winners from..to (inclusive) each get `amount` (fixed) or `percent` of the pool. */
@@ -25,7 +25,7 @@ export interface SplitState {
 }
 
 /** How steeply prizes fall with position for each style (weight = 1 / rank^k). */
-export const STYLE_STEEPNESS: Record<Exclude<SplitStyle, 'custom'>, number> = { balanced: 0.85, 'top-heavy': 1.35, flat: 0.25 };
+export const STYLE_STEEPNESS: Record<Exclude<SplitStyle, 'custom' | 'equal'>, number> = { balanced: 0.85, 'top-heavy': 1.35, flat: 0.25 };
 
 /** Standard bands: 1, 2, 3, 4–10, 11–25, 26–50, 51–100, 101–250, 251–500, … */
 export function standardBands(winners: number): [number, number][] {
@@ -50,6 +50,7 @@ const rid = () => Math.random().toString(36).slice(2, 9);
  */
 export function suggestSplit(pool: number, winners: number, style: Exclude<SplitStyle, 'custom'>): PrizeRange[] {
   if (!(pool > 0) || !(winners >= 1)) return [];
+  if (style === 'equal') return equalSplit(pool, winners);
   const k = STYLE_STEEPNESS[style];
   const bands = standardBands(Math.floor(winners));
   const weight = (r: number) => 1 / Math.pow(r, k);
@@ -165,4 +166,77 @@ export function toCsv(s: SplitState, money: (n: number) => string): string {
     rows.push([label(r), String(rangeSize(r)), money(each), money(tot), s.pool ? `${((tot / s.pool) * 100).toFixed(2)}%` : '']);
   }
   return rows.map((r) => r.map((c) => (/[",\n]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c)).join(',')).join('\n');
+}
+
+/**
+ * Everyone gets the same prize. Works in cents; if the pool does not divide
+ * evenly, the few leftover cents go to 1st place so the total stays exact.
+ */
+export function equalSplit(pool: number, winners: number): PrizeRange[] {
+  const n = Math.floor(winners);
+  const totalCents = Math.round(pool * 100);
+  const each = Math.floor(totalCents / n);
+  const extra = totalCents - each * n;
+  const range = (from: number, to: number, c: number): PrizeRange => ({ id: rid(), from, to, amount: c / 100, percent: pool ? cents((c / 100 / pool) * 100) : 0 });
+  if (!extra) return [range(1, n, each)];
+  return n === 1 ? [range(1, 1, totalCents)] : [range(1, 1, each + extra), range(2, n, each)];
+}
+
+// ---------------------------------------------------------------------------
+// Daily rewards that grow every day.
+// ---------------------------------------------------------------------------
+
+export type GrowthMode = 'steps' | 'percent';
+
+export interface DailyGrowth {
+  /** Reward per winner for each day. */
+  rewards: number[];
+  allocated: number;
+  remaining: number;
+}
+
+/**
+ * Splits a pool across days so each day pays more per winner than the day
+ * before. 'steps': the last day pays about `factor` times the first, in equal
+ * steps. 'percent': each day pays `factor` % more than the day before.
+ * Rewards are whole currency units; what rounding leaves over goes to the
+ * last days, so the total matches the pool whenever the units allow.
+ */
+export function growingDailyRewards(pool: number, winners: number[], mode: GrowthMode, factor: number): DailyGrowth {
+  const days = winners.length;
+  if (!(pool > 0) || !days || winners.some((w) => !(w >= 1))) return { rewards: winners.map(() => 0), allocated: 0, remaining: pool || 0 };
+  const weights = winners.map((_, i) =>
+    mode === 'percent' ? Math.pow(1 + Math.max(0, factor) / 100, i) : days === 1 ? 1 : 1 + ((Math.max(1, factor) - 1) * i) / (days - 1),
+  );
+  // Share of the pool per day, by weight × winners, so per-winner rewards follow the weights.
+  const denom = weights.reduce((a, w, i) => a + w * winners[i], 0);
+  const rewards = weights.map((w) => Math.floor((pool * w) / denom));
+  for (let i = 1; i < days; i++) if (rewards[i] <= rewards[i - 1]) rewards[i] = rewards[i - 1] + 1;
+  let used = rewards.reduce((a, r, i) => a + r * winners[i], 0);
+  // Over the pool (tiny pools): take units back from the first days without breaking the order.
+  for (let i = 0; used > pool && i < days; i++) {
+    while (used > pool && rewards[i] > (i ? rewards[i - 1] + 1 : 1)) {
+      rewards[i]--;
+      used -= winners[i];
+    }
+  }
+  // Leftover: whole units to the last days first (keeps every day above the one before).
+  let left = pool - used;
+  for (let i = days - 1; i >= 0 && left > 0; i--) {
+    const add = Math.floor(left / winners[i]);
+    const cap = i === days - 1 ? add : Math.min(add, (rewards[i + 1] ?? Infinity) - 1 - rewards[i]);
+    if (cap > 0) {
+      rewards[i] += cap;
+      left -= cap * winners[i];
+    }
+  }
+  // Then cents on the last day, if they divide evenly.
+  const lastW = winners[days - 1];
+  const leftCents = Math.round(left * 100);
+  if (leftCents > 0 && leftCents % lastW === 0) {
+    rewards[days - 1] = cents(rewards[days - 1] + leftCents / lastW / 100);
+    left = 0;
+  }
+  const allocated = cents(rewards.reduce((a, r, i) => a + r * winners[i], 0));
+  return { rewards, allocated, remaining: cents(pool - allocated) };
 }
