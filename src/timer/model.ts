@@ -273,3 +273,11 @@ export function suggestTarget(missions: SimMission[], games: Record<string, SimG
   if (pick === m.target) return null;
   return { mission, from: m.target, to: pick, result: pick === lo ? rl : rh };
 }
+
+/** Tunes one task's number (by default the slowest) so the typical last prize lands near the target. */
+export function tuneToTarget(missions: SimMission[], games: Record<string, SimGame>, s: TimerSettings, targetMin: number, index?: number): SimMission[] {
+  if (!missions.length) return missions;
+  const i = index ?? simulateDay(missions, games, { ...s, runs: Math.min(s.runs, 80) }).slowest;
+  const sug = suggestTarget(missions, games, s, targetMin, i);
+  return sug ? missions.map((m, j) => (j === i ? { ...m, target: sug.to } : m)) : missions;
+}

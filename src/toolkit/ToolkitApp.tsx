@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import TimerApp, { type CalcBridge } from '../timer/TimerApp';
+import { simMissionsForDay } from '../sim/days';
 import { Ctx, type ToolkitCtx } from './components/Fields';
 import { ProjectBar } from './components/ProjectBar';
 import { ThemeToggle } from './components/ThemeToggle';
@@ -82,6 +83,18 @@ export default function ToolkitApp() {
     goTab: setTab,
   };
 
+  // Estimated days from every saved project, for "close to this time before".
+  const pastEstimates = useMemo(() => {
+    const realKeys = new Set([1, 2, 3, 4, 5, 6, 7].map((n) => tasksKey(simMissionsForDay(n))));
+    return store.state.projects.flatMap((pr) =>
+      pr.days.flatMap((d, i) => {
+        const e = pr.estimates[d.id];
+        if (!e || e.median == null || e.key !== tasksKey(d.tasks) || realKeys.has(e.key)) return [];
+        return [{ label: `${pr.promo.name || 'Untitled'} · Day ${i + 1}`, minutes: e.median, missions: d.tasks, real: false }];
+      }),
+    );
+  }, [store.state.projects]);
+
   // Mission Calculator ↔ project.
   const bridge: CalcBridge = {
     initial: project.calculator,
@@ -98,6 +111,13 @@ export default function ToolkitApp() {
       });
     },
     days: project.days.map((d, i) => ({ id: d.id, label: `Day ${i + 1}${d.tasks.length ? ` (${d.tasks.length} tasks)` : ''}` })),
+    onSavePlan: (plan, perDay) =>
+      update((p) => ({
+        ...p,
+        promo: { ...p.promo, declaredDays: p.promo.declaredDays ?? plan.length, declaredTasksPerDay: p.promo.declaredTasksPerDay ?? perDay },
+        days: plan.map((tasks, i) => ({ ...(p.days[i] ?? blankDay()), tasks: tasks.map((t) => ({ ...t })) })),
+      })),
+    history: pastEstimates,
     onSaveToDay: (dayId, missions) =>
       update((p) =>
         dayId === 'new'

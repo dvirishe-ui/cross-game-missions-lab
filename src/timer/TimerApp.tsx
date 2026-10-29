@@ -7,8 +7,8 @@ import { simMissionsForDay } from '../sim/days';
 import { DEFAULT_CLOCK, chanceAtLeastHits, meanRoundSec, roundsPerHour } from './clock';
 import { verifyAviatorRound } from './provablyFair';
 import { FITTED_SPEED, FIT_DAYS, playersFor, runsFor } from './days';
-import { randomSet, suggestedSet } from './generate';
-import { goneByCurve, ROUND_GAMES, simulateDay, suggestTarget, type Suggestion, type TimerResult, type TimerSettings } from './model';
+import { randomTimedSet, suggestedSet, variedSet } from './generate';
+import { goneByCurve, ROUND_GAMES, simulateDay, suggestTarget, tuneToTarget, type Suggestion, type TimerResult, type TimerSettings } from './model';
 import type { CalcState } from '../toolkit/model/project';
 
 /** Connects the calculator to the Promo Toolkit's current project. Without it the calculator works on its own. */
@@ -18,7 +18,27 @@ export interface CalcBridge {
   onResult: (s: CalcState, r: TimerResult) => void;
   days: { id: string; label: string }[];
   onSaveToDay: (dayId: string, missions: SimMission[]) => void;
+  /** Saves a multi-day plan as the campaign's days. */
+  onSavePlan?: (plan: SimMission[][], tasksPerDay: number) => void;
+  /** Days from saved projects with a duration estimate, to compare with. */
+  history?: PastDay[];
 }
+
+/** A past (or estimated) challenge day to compare a target time with. */
+export interface PastDay {
+  label: string;
+  minutes: number;
+  missions: SimMission[];
+  real: boolean;
+}
+
+/** The 5–11 Oct days with their real last-prize times. */
+const REAL_PAST: PastDay[] = DAY_RESULTS.filter((r) => r.winners > 0).map((r) => ({
+  label: `Day ${r.day} of the 5–11 Oct challenge`,
+  minutes: r.durationMin,
+  missions: simMissionsForDay(r.day),
+  real: true,
+}));
 
 
 const GAMES = gameMap(SIM_GAMES);
@@ -76,6 +96,12 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
   const [dayId, setDayId] = useState<string | null>(init?.dayId ?? null);
   const [saveTo, setSaveTo] = useState<string>(init?.dayId ?? 'new');
   const [savedNote, setSavedNote] = useState('');
+  const [planDays, setPlanDays] = useState(init?.planDays ?? 1);
+  const [tasksPerDay, setTasksPerDay] = useState(init?.tasksPerDay ?? 6);
+  const [plan, setPlan] = useState<SimMission[][] | null>(init?.plan ?? null);
+  const [activeDay, setActiveDay] = useState(init?.activeDay ?? 0);
+  const [planTimes, setPlanTimes] = useState<Record<number, number>>({});
+  const [presses, setPresses] = useState(0);
   const clock = DEFAULT_CLOCK;
   const targetMin = (Number.isFinite(targetH) ? targetH : 0) * 60 + (Number.isFinite(targetM) ? targetM : 0);
   const target = dur(targetMin);
@@ -99,13 +125,13 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
   // Simulate past the end of the challenge so there is always a time to show.
   const horizon = Math.min(4320, Math.max(windowMin * 3, 600));
 
-  const calcState: CalcState = { missions, windowMin, targetMin, tol, prizes: winners, bets, source, dayId };
+  const calcState: CalcState = { missions, windowMin, targetMin, tol, prizes: winners, bets, source, dayId, plan, activeDay, planDays, tasksPerDay };
   const bridgeRef = useRef(bridge);
   bridgeRef.current = bridge;
   useEffect(() => {
     bridgeRef.current?.onChange(calcState);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [missions, windowMin, targetMin, tol, winners, bets, source, dayId]);
+  }, [missions, windowMin, targetMin, tol, winners, bets, source, dayId, plan, activeDay, planDays, tasksPerDay]);
 
   useEffect(() => {
     setBusy(true);
@@ -114,6 +140,7 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
       const r = ready ? simulateDay(missions, GAMES, settings, horizon) : null;
       setResult(r);
       setBusy(false);
+      if (r && plan) setPlanTimes((t) => ({ ...t, [activeDay]: r.median }));
       if (r) bridgeRef.current?.onResult(calcState, { ...r, pAllGone: shareWithin(r, windowMin) });
     }, 60);
     return () => clearTimeout(t);
@@ -131,19 +158,49 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
   const setTasks = (ms: SimMission[], label: string) => {
     setMissions(ms);
     setSource(label);
+    // Editing one day of a plan keeps the plan in step.
+    if (plan) setPlan(plan.map((d, i) => (i === activeDay ? ms : d)));
+  };
+  const openPlanDay = (i: number, p = plan) => {
+    if (!p?.[i]) return;
+    setActiveDay(i);
+    setMissions(p[i]);
+    setSource(`Day ${i + 1} of ${p.length}`);
+  };
+  /** Builds one task list, or one per day, each tuned to the target time. */
+  const build = (kind: 'suggest' | 'random', goal = targetMin, w = windowMin) => {
+    setBusy(true);
+    const press = presses + 1;
+    setPresses(press);
+    setTimeout(() => {
+      const s = { ...settings, windowMin: w };
+      const n = Math.max(1, Math.min(31, Math.floor(planDays) || 1));
+      const per = Math.max(1, Math.min(12, Math.floor(tasksPerDay) || 6));
+      const base = Date.now() % 1e9;
+      const days = Array.from({ length: n }, (_, d) => {
+        const seed = base + d * 7919;
+        return kind === 'suggest'
+          ? tuneToTarget(variedSet(goal, per, seed, GAMES, FITTED_SPEED, clock, bets), GAMES, s, goal, 0)
+          : tuneToTarget(randomTimedSet(goal, per, seed, GAMES, FITTED_SPEED, clock, bets), GAMES, s, goal);
+      });
+      const what = kind === 'suggest' ? 'Suggested' : 'Random';
+      setPlanTimes({});
+      if (n > 1) {
+        setPlan(days);
+        setActiveDay(0);
+        setMissions(days[0]);
+        setSource(`${what} plan · Day 1 of ${n} · option ${press}`);
+      } else {
+        setPlan(null);
+        setMissions(days[0]);
+        setSource(`${what} for ${dur(goal)} of ${dur(w)} · option ${press}`);
+      }
+    }, 30);
   };
   const edit = (i: number, patch: Partial<SimMission>) => setTasks(missions.map((m, j) => (j === i ? { ...m, ...patch } : m)), 'Your tasks');
 
-  const suggestFor = (goal: number, w: number) => {
-    setBusy(true);
-    setTimeout(() => {
-      // Size the set, then fine-tune the Aviator count so the typical day lands on the target.
-      const base = suggestedSet(goal, GAMES, FITTED_SPEED, clock, bets);
-      const tuned = suggestTarget(base, GAMES, { ...settings, windowMin: w }, goal, 0);
-      setTasks(tuned ? base.map((m, i) => (i === 0 ? { ...m, target: tuned.to } : m)) : base, `Suggested: last prize after ${dur(goal)} of ${dur(w)}`);
-    }, 30);
-  };
-  const suggest = () => suggestFor(targetMin, windowMin);
+  const suggestFor = (goal: number, w: number) => build('suggest', goal, w);
+  const suggest = () => build('suggest');
   /** Picking a length aims the last prize at about 80% of it and suggests tasks straight away. */
   const pickLength = (w: number) => {
     if (!Number.isFinite(w) || w < 10) return;
@@ -154,10 +211,14 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
     setTol(round5(w * 0.1));
     suggestFor(goal, w);
   };
-  const random = () => {
-    const seed = Math.floor(Math.random() * 1e9);
-    setTasks(randomSet(seed, GAMES), 'Random set');
-  };
+  const random = () => build('random');
+  // Past days whose last prize went close to the target time.
+  const past = [...REAL_PAST, ...(bridge?.history ?? [])];
+  const near = Math.max(20, targetMin * 0.25);
+  const matches = past
+    .map((d) => ({ ...d, diff: Math.abs(d.minutes - targetMin) }))
+    .sort((a, b) => a.diff - b.diff);
+  const closeOnes = matches.filter((d) => d.diff <= near).slice(0, 4);
   const openBefore = () => {
     setShowBefore(true);
     setTimeout(() => beforeRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
@@ -254,12 +315,55 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
             <span className="t-muted t-small">Optional. Blank means {DEFAULT_WINNERS}. The time shown is until the last winner finishes.</span>
           </div>
 
+          <div className="t-length" role="group" aria-label="Days and tasks">
+            <span className="t-length-label">How many days?</span>
+            <div className="t-length-chips">
+              {[1, 3, 5, 7].map((n) => (
+                <button key={n} type="button" aria-pressed={planDays === n} onClick={() => setPlanDays(n)}>
+                  {n}
+                </button>
+              ))}
+              <span className="t-pair t-length-custom">
+                <span className="t-muted">or</span>
+                <input id="plan-days" type="number" min={1} max={31} aria-label="Number of days" value={show(planDays)} onChange={(e) => setPlanDays(num(e.target.value))} />
+              </span>
+            </div>
+            <span className="t-length-label">Tasks a day</span>
+            <div className="t-length-chips">
+              {[4, 5, 6].map((n) => (
+                <button key={n} type="button" aria-pressed={tasksPerDay === n} onClick={() => setTasksPerDay(n)}>
+                  {n}
+                </button>
+              ))}
+              <input id="plan-tasks" type="number" min={1} max={12} aria-label="Tasks per day" value={show(tasksPerDay)} onChange={(e) => setTasksPerDay(num(e.target.value))} />
+            </div>
+            <span className="t-muted t-small">Suggest and Random build every day, each different, each aimed at {target}. Press again for another option.</span>
+          </div>
+
+          <div className="t-past" aria-live="polite">
+            <b>Close to {target} before:</b>
+            {closeOnes.length ? (
+              closeOnes.map((d, i) => (
+                <span key={i} className="t-past-item">
+                  {d.label} · {d.real ? 'real' : 'estimated'} {dur(d.minutes)}
+                  <button className="k-link" onClick={() => setTasks(d.missions.map((m) => ({ ...m })), `${d.label} (${dur(d.minutes)})`)}>
+                    Use these tasks
+                  </button>
+                </span>
+              ))
+            ) : (
+              <span className="t-muted">
+                Nothing within {dur(near)}.{matches[0] && ` Closest: ${matches[0].label}, ${dur(matches[0].minutes)}.`}
+              </span>
+            )}
+          </div>
+
           <div className="t-toolbar" role="toolbar" aria-label="Task sets">
             <button id="suggest" className="t-btn primary" onClick={suggest} disabled={busy}>
-              Suggest for {target}
+              {presses ? 'Another suggestion' : planDays > 1 ? `Suggest ${planDays} days` : 'Suggest'} for {target}
             </button>
             <button id="random" className="t-btn" onClick={random} disabled={busy}>
-              Random
+              Random for {target}
             </button>
             <button id="add-task" className="t-btn" onClick={() => setTasks([...missions, { game: 'mines', kind: 'bets', target: 100 }], 'Your tasks')}>
               + Add task
@@ -278,6 +382,32 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
                 <h3>Tasks</h3>
                 <span className="t-source">{source}</span>
               </div>
+              {plan && plan.length > 1 && (
+                <div className="t-plan" role="tablist" aria-label="Days of the plan">
+                  {plan.map((_, i) => (
+                    <button key={i} role="tab" id={`plan-day-${i + 1}`} aria-selected={i === activeDay} onClick={() => openPlanDay(i)}>
+                      Day {i + 1}
+                      <small>{planTimes[i] != null ? (Number.isFinite(planTimes[i]) ? dur(planTimes[i]) : 'too long') : '…'}</small>
+                    </button>
+                  ))}
+                  {bridge?.onSavePlan && (
+                    <button
+                      id="save-plan"
+                      className="t-btn"
+                      onClick={() => {
+                        bridge.onSavePlan!(plan, Math.floor(tasksPerDay) || 6);
+                        setSavedNote(`Saved all ${plan.length} days to the campaign.`);
+                        setTimeout(() => setSavedNote(''), 4000);
+                      }}
+                    >
+                      Save all {plan.length} days to campaign
+                    </button>
+                  )}
+                  <button className="k-link" onClick={() => setPlan(null)}>
+                    Close plan
+                  </button>
+                </div>
+              )}
               {bridge && (
                 <div className="t-saveday">
                   <label htmlFor="save-to-day">Save these tasks to</label>

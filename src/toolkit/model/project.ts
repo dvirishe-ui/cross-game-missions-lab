@@ -53,6 +53,11 @@ export interface CalcState {
   source: string;
   /** Day the tasks were loaded from, if any. */
   dayId: string | null;
+  /** A multi-day plan from Suggest / Random (one task list per day). */
+  plan?: SimMission[][] | null;
+  activeDay?: number;
+  planDays?: number;
+  tasksPerDay?: number;
 }
 
 export interface Estimate {
