@@ -60,6 +60,8 @@ export interface CalcState {
   tasksPerDay?: number;
   /** Market whose most-played games the suggestions favour. */
   country?: string;
+  /** Weight up game types other providers also offer. */
+  crossBoost?: boolean;
 }
 
 export interface Estimate {

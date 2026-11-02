@@ -49,3 +49,37 @@ describe('market-aware suggestions', () => {
     expect(count.plinko).toBeGreaterThan(count.trader ?? 0);
   });
 });
+
+describe('strict markets and cross-provider games', () => {
+  it('never uses a game that is not live in the market', async () => {
+    const { marketGames, variedSet, randomTimedSet } = await import('./generate');
+    const { GAME_RANKING } = await import('../data/gameRanking');
+    const afg = marketGames(GAME_RANKING.Afghanistan); // no Trader there
+    expect(afg).not.toContain('trader');
+    for (let seed = 1; seed <= 100; seed++) {
+      for (const m of [...variedSet(180, 6, seed, games, 1.4, DEFAULT_CLOCK, 2, afg), ...randomTimedSet(180, 6, seed, games, 1.4, DEFAULT_CLOCK, 2, afg)]) expect(afg).toContain(m.game);
+    }
+    expect(marketGames(GAME_RANKING.Antarctica)).toEqual([]);
+    expect(variedSet(180, 6, 1, games, 1.4, DEFAULT_CLOCK, 2, [])).toEqual([]);
+  });
+  it('a market with only Aviator still gets a plan', async () => {
+    const { marketGames, variedSet } = await import('./generate');
+    const { GAME_RANKING } = await import('../data/gameRanking');
+    const only = marketGames(GAME_RANKING.Bermuda);
+    expect(only).toEqual(['aviator']);
+    const set = variedSet(120, 4, 3, games, 1.4, DEFAULT_CLOCK, 2, only);
+    expect(set.length).toBe(4);
+    expect(set.every((m) => m.game === 'aviator')).toBe(true);
+  });
+  it('the cross-provider boost brings Mines, Plinko and Keno in more often', async () => {
+    const { marketGames, variedSet, CROSS_PROVIDER } = await import('./generate');
+    const { GAME_RANKING } = await import('../data/gameRanking');
+    const m = marketGames(GAME_RANKING.Kenya); // aviator, plinko, trader, pilot-chicken, goal, keno, mines
+    const share = (boost: string[]) => {
+      let hit = 0;
+      for (let seed = 1; seed <= 300; seed++) hit += variedSet(180, 3, seed, games, 1.4, DEFAULT_CLOCK, 2, m, boost as never).filter((x) => x.game === 'mines' || x.game === 'keno').length;
+      return hit;
+    };
+    expect(share(CROSS_PROVIDER)).toBeGreaterThan(share([]) * 1.3);
+  });
+});

@@ -7,7 +7,7 @@ import { simMissionsForDay } from '../sim/days';
 import { DEFAULT_CLOCK, chanceAtLeastHits, meanRoundSec, roundsPerHour } from './clock';
 import { verifyAviatorRound } from './provablyFair';
 import { FITTED_SPEED, FIT_DAYS, playersFor, runsFor } from './days';
-import { marketGames, randomTimedSet, suggestedSet, variedSet } from './generate';
+import { CROSS_PROVIDER, marketGames, randomTimedSet, suggestedSet, variedSet } from './generate';
 import { GAME_RANKING } from '../data/gameRanking';
 import { goneByCurve, ROUND_GAMES, simulateDay, suggestTarget, tuneToTarget, type Suggestion, type TimerResult, type TimerSettings } from './model';
 import type { CalcState } from '../toolkit/model/project';
@@ -113,6 +113,8 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
   const [country, setCountry] = useState(init?.country ?? countryIn(bridge?.marketHint));
   const ranking = country ? GAME_RANKING[country] : undefined;
   const market = ranking ? marketGames(ranking) : undefined;
+  const [crossBoost, setCrossBoost] = useState(init?.crossBoost ?? true);
+  const boost = crossBoost ? CROSS_PROVIDER : [];
   const clock = DEFAULT_CLOCK;
   const targetMin = (Number.isFinite(targetH) ? targetH : 0) * 60 + (Number.isFinite(targetM) ? targetM : 0);
   const target = dur(targetMin);
@@ -136,13 +138,13 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
   // Simulate past the end of the challenge so there is always a time to show.
   const horizon = Math.min(4320, Math.max(windowMin * 3, 600));
 
-  const calcState: CalcState = { missions, windowMin, targetMin, tol, prizes: winners, bets, source, dayId, plan, activeDay, planDays, tasksPerDay, country };
+  const calcState: CalcState = { missions, windowMin, targetMin, tol, prizes: winners, bets, source, dayId, plan, activeDay, planDays, tasksPerDay, country, crossBoost };
   const bridgeRef = useRef(bridge);
   bridgeRef.current = bridge;
   useEffect(() => {
     bridgeRef.current?.onChange(calcState);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [missions, windowMin, targetMin, tol, winners, bets, source, dayId, plan, activeDay, planDays, tasksPerDay, country]);
+  }, [missions, windowMin, targetMin, tol, winners, bets, source, dayId, plan, activeDay, planDays, tasksPerDay, country, crossBoost]);
 
   useEffect(() => {
     setBusy(true);
@@ -180,6 +182,10 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
   };
   /** Builds one task list, or one per day, each tuned to the target time. */
   const build = (kind: 'suggest' | 'random', goal = targetMin, w = windowMin) => {
+    if (market && !market.length) {
+      setSource(`No games the calculator can time are live in ${country}`);
+      return;
+    }
     setBusy(true);
     const press = presses + 1;
     setPresses(press);
@@ -191,8 +197,8 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
       const days = Array.from({ length: n }, (_, d) => {
         const seed = base + d * 7919;
         return kind === 'suggest'
-          ? tuneToTarget(variedSet(goal, per, seed, GAMES, FITTED_SPEED, clock, bets, market), GAMES, s, goal, 0)
-          : tuneToTarget(randomTimedSet(goal, per, seed, GAMES, FITTED_SPEED, clock, bets, market), GAMES, s, goal);
+          ? tuneToTarget(variedSet(goal, per, seed, GAMES, FITTED_SPEED, clock, bets, market, boost), GAMES, s, goal, 0)
+          : tuneToTarget(randomTimedSet(goal, per, seed, GAMES, FITTED_SPEED, clock, bets, market, boost), GAMES, s, goal);
       });
       const what = `${kind === 'suggest' ? 'Suggested' : 'Random'}${country ? ` for ${country}` : ''}`;
       setPlanTimes({});
@@ -363,6 +369,16 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
                 </option>
               ))}
             </select>
+            <label className="t-inline-check" title="Mines, Plinko, Keno and crash games are offered by many providers. Missions on Spribe's version can bring those players over.">
+              <input id="cross-boost" type="checkbox" checked={crossBoost} onChange={(e) => setCrossBoost(e.target.checked)} /> Favour games players also play at other providers (Mines, Plinko, Keno, Aviator)
+            </label>
+            {ranking && market && (
+              <span className={`t-small ${market.length ? 't-muted' : 'k-err'}`}>
+                {market.length
+                  ? `Suggestions use only the ${market.length} calculator game${market.length === 1 ? '' : 's'} live in ${country}: ${market.map((g) => GAMES[g].name).join(', ')}.`
+                  : `None of the games the calculator can time are live in ${country}.`}
+              </span>
+            )}
             {ranking ? (
               <span className="t-rank">
                 Most played there:{' '}

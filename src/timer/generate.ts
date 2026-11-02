@@ -117,17 +117,28 @@ export function sizeTask(id: GameId, kind: SimMission['kind'], x: number | undef
   return { game: id, kind, threshold: x, target: Math.max(2, Math.round(minutes * rate * p)) };
 }
 
-/** Games the calculator can time, in a country's rank order (most played first). */
+/**
+ * Games the calculator can time that are live in a market, in that market's
+ * rank order (most played first). Strict: a game not listed for the market is
+ * never used, so the list can be empty.
+ */
 export function marketGames(ranking: string[] | undefined): GameId[] {
   if (!ranking) return PLAN_GAMES;
-  const ranked = ranking.filter((g): g is GameId => (PLAN_GAMES as string[]).includes(g));
-  return ranked.length ? ranked : PLAN_GAMES;
+  return ranking.filter((g): g is GameId => (PLAN_GAMES as string[]).includes(g));
 }
 
-/** Order games at random, but favour the top-ranked ones (weight 1 / rank). */
-function favourTop(games: GameId[], rng: () => number): GameId[] {
+/**
+ * Game types that many other providers also offer (Mines, Plinko, Keno and
+ * crash games). Missions on Spribe's version are a chance to bring those
+ * players over, so suggestions can weight them up.
+ */
+export const CROSS_PROVIDER: GameId[] = ['mines', 'plinko', 'keno', 'aviator'];
+export const CROSS_PROVIDER_BOOST = 2;
+
+/** Order games at random, favouring the top-ranked (weight 1 / rank) and any boosted games. */
+function favourTop(games: GameId[], rng: () => number, boost: GameId[] = []): GameId[] {
   return games
-    .map((g, i) => ({ g, key: -Math.log(1 - rng()) * (i + 1) }))
+    .map((g, i) => ({ g, key: (-Math.log(1 - rng()) * (i + 1)) / (boost.includes(g) ? CROSS_PROVIDER_BOOST : 1) }))
     .sort((a, b) => a.key - b.key)
     .map((x) => x.g);
 }
@@ -147,16 +158,19 @@ const shuffled = <T,>(xs: T[], rng: () => number) => {
  * types and multipliers, so every seed (and every day) gives a different set.
  * The first task is the one to tune.
  */
-export function variedSet(targetMin: number, tasks: number, seed: number, games: Record<string, SimGame>, speed: number, clock: AviatorClock, bets: 1 | 2, market?: GameId[]): SimMission[] {
+export function variedSet(targetMin: number, tasks: number, seed: number, games: Record<string, SimGame>, speed: number, clock: AviatorClock, bets: 1 | 2, market?: GameId[], boost: GameId[] = []): SimMission[] {
   const rng = mulberry32(seed);
   const T = Math.max(15, targetMin);
-  // With a market, the round game that ranks higher there sets the time.
+  if (market && !market.length) return [];
+  // With a market, the round game that ranks higher there sets the time; with
+  // no round game live there, its top game does.
   const rounds = market?.filter((g) => g === 'aviator' || g === 'trader') ?? [];
-  const anchor: GameId = market ? (rounds.length === 2 && rng() < 0.2 ? rounds[1] : rounds[0] ?? 'aviator') : rng() < 0.75 ? 'aviator' : 'trader';
-  const xs = T < 45 ? [5, 10] : T < 90 ? [10, 20] : anchor === 'aviator' ? [20, 30, 50] : [20, 30];
+  const anchor: GameId = market ? (rounds.length === 2 && rng() < 0.2 ? rounds[1] : rounds[0] ?? market[0]) : rng() < 0.75 ? 'aviator' : 'trader';
+  const xs = !isRound(anchor) ? MENU[anchor].catch : T < 45 ? [5, 10] : T < 90 ? [10, 20] : anchor === 'aviator' ? [20, 30, 50] : [20, 30];
   const x = xs[Math.floor(rng() * xs.length)];
   const out: SimMission[] = [sizeTask(anchor, 'catch', x, T * 0.95, games, speed, clock, bets)];
-  const pool = market ? favourTop(market.filter((g) => g !== anchor), rng) : shuffled(PLAN_GAMES.filter((g) => g !== anchor), rng);
+  const others = (market ?? PLAN_GAMES).filter((g) => g !== anchor);
+  const pool = !others.length ? [anchor] : market ? favourTop(others, rng, boost) : boost.length ? favourTop(shuffled(others, rng), rng, boost) : shuffled(others, rng);
   const used = new Set<string>();
   for (let i = 0; i < Math.max(0, tasks - 1); i++) {
     const id = pool[i % pool.length];
@@ -171,11 +185,12 @@ export function variedSet(targetMin: number, tasks: number, seed: number, games:
 }
 
 /** A random set: any games and task types, each sized to finish somewhere in 35–95% of the target. */
-export function randomTimedSet(targetMin: number, tasks: number, seed: number, games: Record<string, SimGame>, speed: number, clock: AviatorClock, bets: 1 | 2, market?: GameId[]): SimMission[] {
+export function randomTimedSet(targetMin: number, tasks: number, seed: number, games: Record<string, SimGame>, speed: number, clock: AviatorClock, bets: 1 | 2, market?: GameId[], boost: GameId[] = []): SimMission[] {
   const rng = mulberry32(seed);
   const T = Math.max(15, targetMin);
   const all = market ?? PLAN_GAMES;
-  const pool = market ? favourTop(market, rng) : shuffled(PLAN_GAMES, rng);
+  if (!all.length) return [];
+  const pool = market ? favourTop(market, rng, boost) : boost.length ? favourTop(shuffled(PLAN_GAMES, rng), rng, boost) : shuffled(PLAN_GAMES, rng);
   return Array.from({ length: Math.max(1, tasks) }, (_, i) => {
     const id = i < pool.length ? pool[i] : all[Math.floor(rng() * all.length)];
     const menu = MENU[id];
