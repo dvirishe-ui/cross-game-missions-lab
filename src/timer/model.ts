@@ -87,11 +87,20 @@ function lognormal(rng: Rng, sigma: number): number {
   return Math.exp(sigma * z - (sigma * sigma) / 2);
 }
 
-/** Bets to get k successes; a normal approximation once k is large (same mean and spread, much faster). */
+/**
+ * Bets to get k successes. The first 40 successes are drawn exactly; any more
+ * use a normal approximation with one fixed draw. With the same random stream,
+ * a larger k never gives fewer bets.
+ */
 function attempts(k: number, p: number, rng: Rng): number {
-  if (k <= 40) return sampleNegBinomAttempts(k, p, rng);
-  const z = Math.sqrt(-2 * Math.log(Math.max(1e-12, rng()))) * Math.cos(2 * Math.PI * rng());
-  return Math.max(k, k / p + z * Math.sqrt(k * (1 - p)) / p);
+  const exact = Math.min(k, 40);
+  let total = sampleNegBinomAttempts(exact, p, rng);
+  const rest = k - exact;
+  if (rest > 0) {
+    const z = Math.sqrt(-2 * Math.log(Math.max(1e-12, rng()))) * Math.cos(2 * Math.PI * rng());
+    total += Math.max(0, rest / p + (z * Math.sqrt(rest * (1 - p))) / p);
+  }
+  return total;
 }
 
 function soloTime(m: SimMission, g: SimGame, rate: number, rng: Rng): number {
@@ -105,13 +114,46 @@ function soloTime(m: SimMission, g: SimGame, rate: number, rng: Rng): number {
   return c.p <= 0 ? Infinity : attempts(Math.ceil(m.target / c.pays), c.p, rng) / rate;
 }
 
-export function runDay(missions: SimMission[], games: Record<string, SimGame>, s: TimerSettings, rng: Rng, horizon = s.windowMin): TimerRun {
-  // One shared round sequence per round game (Aviator, Trader).
+/** Mixes numbers into one 32-bit seed. */
+function mix(...xs: number[]): number {
+  let h = 0x9e3779b9;
+  for (const x of xs) {
+    h = Math.imul(h ^ (x >>> 0), 0x85ebca6b);
+    h ^= h >>> 13;
+    h = Math.imul(h, 0xc2b2ae35);
+    h ^= h >>> 16;
+  }
+  return h >>> 0;
+}
+const strSeed = (str: string) => {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) h = Math.imul(h ^ str.charCodeAt(i), 16777619);
+  return h >>> 0;
+};
+
+/**
+ * Stable identity of a task for its random stream: game, type and multiplier,
+ * but not the count. Changing a task's count then replays the same luck, so
+ * more of a task can never make the day shorter, and other tasks are untouched.
+ */
+function taskSeeds(missions: SimMission[]): number[] {
+  const seen = new Map<string, number>();
+  return missions.map((m) => {
+    const key = `${m.game}|${m.kind}|${m.threshold ?? ''}`;
+    const n = seen.get(key) ?? 0;
+    seen.set(key, n + 1);
+    return strSeed(`${key}|${n}`);
+  });
+}
+
+export function runDay(missions: SimMission[], games: Record<string, SimGame>, s: TimerSettings, run: number, horizon = s.windowMin): TimerRun {
+  // One shared round sequence per round game (Aviator, Trader), seeded by the run alone.
   const rounds = new Map<string, Rounds>();
   for (const m of missions) {
     const rg = ROUND_GAMES[m.game];
-    if (rg && !rounds.has(m.game)) rounds.set(m.game, makeRounds(rg.clock(s), rg.max, horizon, mulberry32(Math.floor(rng() * 4294967296))));
+    if (rg && !rounds.has(m.game)) rounds.set(m.game, makeRounds(rg.clock(s), rg.max, horizon, mulberry32(mix(s.seed, run, strSeed(m.game)))));
   }
+  const seeds = taskSeeds(missions);
   // Qualifying rounds per round-game mission: the minute a cash-out at x is reached.
   const hits = missions.map((m) => {
     const r = rounds.get(m.game);
@@ -125,12 +167,14 @@ export function runDay(missions: SimMission[], games: Record<string, SimGame>, s
   const times: number[][] = missions.map(() => []);
   const finish: number[] = [];
   for (let p = 0; p < s.players; p++) {
-    const pace = lognormal(rng, s.spread);
+    const pace = lognormal(mulberry32(mix(s.seed, run, 1, p)), s.spread);
     // A slower player sits out some Aviator rounds; nobody plays rounds faster than they happen.
     const q = Math.min(1, pace);
     let worst = 0;
     missions.forEach((m, j) => {
       const h = hits[j];
+      // Each player has their own stream per task, so their luck does not depend on other players or tasks.
+      const rng = mulberry32(mix(s.seed, run, seeds[j], p));
       let t: number;
       if (h) {
         t = Infinity;
@@ -165,9 +209,8 @@ export function runDay(missions: SimMission[], games: Record<string, SimGame>, s
 const pct = (sorted: number[], q: number) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(q * sorted.length) - 1))];
 
 export function simulateDay(missions: SimMission[], games: Record<string, SimGame>, s: TimerSettings, horizon = s.windowMin): TimerResult {
-  const rng = mulberry32(s.seed);
   const runs: TimerRun[] = [];
-  for (let i = 0; i < s.runs; i++) runs.push(runDay(missions, games, s, rng, horizon));
+  for (let i = 0; i < s.runs; i++) runs.push(runDay(missions, games, s, i, horizon));
   const all = runs.map((r) => r.lastPrize ?? Infinity).sort((a, b) => a - b);
   const missionNthMedian = missions.map((_, j) => pct(runs.map((r) => r.missionNth[j]).sort((a, b) => a - b), 0.5));
   const lastCount = missions.map(() => 0);

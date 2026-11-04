@@ -56,3 +56,28 @@ describe('last-prize model', () => {
     expect(s!.to).toBeGreaterThan(s!.from);
   });
 });
+
+describe('consistent answers', () => {
+  it('more of a task never makes the day shorter, less never makes it longer', async () => {
+    const { suggestedSet } = await import('./generate');
+    const set = suggestedSet(240, games, 1.4, DEFAULT_CLOCK, 2);
+    const s = { ...base, spread: 0, speed: 1.4, runs: 150, windowMin: 300 };
+    for (const i of [0, 1, 2]) {
+      let prev = -Infinity;
+      for (const f of [0.6, 0.8, 0.9, 1, 1.1, 1.25, 1.5]) {
+        const m = set.map((t, j) => (j === i ? { ...t, target: Math.max(1, Math.round(t.target * f)) } : t));
+        const med = simulateDay(m, games, s, 900).median;
+        expect(med).toBeGreaterThanOrEqual(prev);
+        prev = med;
+      }
+    }
+  }, 120_000);
+  it('changing one task does not change another task’s time', () => {
+    const set = simMissionsForDay(7);
+    const s = { ...base, spread: 0, speed: 1.4, runs: 80 };
+    const a = simulateDay(set, games, s, 900);
+    const b = simulateDay(set.map((t, j) => (j === 1 ? { ...t, target: t.target + 5 } : t)), games, s, 900);
+    expect(b.missionNthMedian[0]).toBe(a.missionNthMedian[0]);
+    expect(b.missionNthMedian[3]).toBe(a.missionNthMedian[3]);
+  }, 60_000);
+});

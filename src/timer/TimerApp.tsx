@@ -6,6 +6,7 @@ import { SIM_GAMES, chanceAtLeast, oneIn } from '../sim/games';
 import { simMissionsForDay } from '../sim/days';
 import { DEFAULT_CLOCK, chanceAtLeastHits, meanRoundSec, roundsPerHour } from './clock';
 import { verifyAviatorRound } from './provablyFair';
+import { simulateAsync } from './simClient';
 import { FITTED_SPEED, FIT_DAYS, playersFor, runsFor } from './days';
 import { CROSS_PROVIDER, marketGames, randomTimedSet, suggestedSet, variedSet } from './generate';
 import { GAME_RANKING } from '../data/gameRanking';
@@ -149,14 +150,26 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
   useEffect(() => {
     setBusy(true);
     setSuggestion(null);
+    let live = true;
+    // Wait for typing to pause, then simulate in a background worker.
     const t = setTimeout(() => {
-      const r = ready ? simulateDay(missions, GAMES, settings, horizon) : null;
-      setResult(r);
-      setBusy(false);
-      if (r && plan) setPlanTimes((t) => ({ ...t, [activeDay]: r.median }));
-      if (r) bridgeRef.current?.onResult(calcState, { ...r, pAllGone: shareWithin(r, windowMin) });
-    }, 60);
-    return () => clearTimeout(t);
+      if (!ready) {
+        setResult(null);
+        setBusy(false);
+        return;
+      }
+      simulateAsync(missions, settings, horizon).then((r) => {
+        if (!live) return;
+        setResult(r);
+        setBusy(false);
+        if (plan) setPlanTimes((t) => ({ ...t, [activeDay]: r.median }));
+        bridgeRef.current?.onResult(calcState, { ...r, pAllGone: shareWithin(r, windowMin) });
+      });
+    }, 250);
+    return () => {
+      live = false;
+      clearTimeout(t);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [missions, settings, ready, horizon]);
 
@@ -214,7 +227,11 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
       }
     }, 30);
   };
-  const edit = (i: number, patch: Partial<SimMission>) => setTasks(missions.map((m, j) => (j === i ? { ...m, ...patch } : m)), 'Your tasks');
+  const [lastEdit, setLastEdit] = useState<number | null>(null);
+  const edit = (i: number, patch: Partial<SimMission>) => {
+    if ('target' in patch || 'threshold' in patch) setLastEdit(i);
+    setTasks(missions.map((m, j) => (j === i ? { ...m, ...patch } : m)), 'Your tasks');
+  };
 
   const suggestFor = (goal: number, w: number) => build('suggest', goal, w);
   const suggest = () => build('suggest');
@@ -526,6 +543,7 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
                       <button className="t-x" aria-label={`Remove ${describe(m)}`} onClick={() => setTasks(missions.filter((_, j) => j !== i), 'Your tasks')}>
                         ×
                       </button>
+                      {lastEdit === i && <WhyNoChange i={i} m={m} missions={missions} result={result} busy={busy} />}
                     </div>
                   );
                 })}
@@ -992,5 +1010,25 @@ function RoundChecker() {
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Shown under a task just edited when it is not the one that decides the
+ * time: players run every game at once on auto, so an easier task finishes
+ * while the slowest is still running and does not move the last prize.
+ */
+function WhyNoChange({ i, m, missions, result, busy }: { i: number; m: SimMission; missions: SimMission[]; result: TimerResult | null; busy: boolean }) {
+  if (busy || !result || result.missionNthMedian.length !== missions.length || i === result.slowest) return null;
+  const own = result.missionNthMedian[i];
+  const slow = missions[result.slowest];
+  if (!Number.isFinite(own) || !slow || !(own < result.median - 1)) return null;
+  // Rough count at which this task would take as long as the slowest one.
+  const limit = Math.floor((m.target * result.median) / own);
+  return (
+    <p className="t-why">
+      This task finishes earlier ({dur(own)}), so it doesn’t change the overall time: players run every game at once on auto, so the last prize still waits for{' '}
+      <b>{describe(slow)}</b>. It starts to matter above roughly {limit.toLocaleString('en-US')}.
+    </p>
   );
 }
