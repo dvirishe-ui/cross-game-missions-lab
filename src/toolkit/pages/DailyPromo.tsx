@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Chip, DateField, Grid, NumberField, Section, SelectField, TextField, TimeField, useToolkit } from '../components/Fields';
 import type { GameId } from '../../data/games';
+import { DEFAULT_POPULARITY, POPULARITY, POPULARITY_SOURCE } from '../../data/gamePopularity';
 import { DEFAULT_CLOCK, meanRoundSec } from '../../timer/clock';
 import { copyText, saveFile, slug } from '../model/exporting';
 import { fmtMoney } from '../model/money';
@@ -12,7 +13,7 @@ import { addDays, fmtShort, parseZone, validDate } from '../model/time';
 import { allocate, fromMinor, pct, slotScenario } from '../daily/allocate';
 import {
   DEFAULT_ASSUMPTIONS,
-  EXACT_GAMES,
+  MODEL_GAMES,
   GAME_BY_ID,
   betsPerMinFor,
   individualChance,
@@ -39,6 +40,8 @@ import {
   editDay,
   freePeakStarts,
   peakFactor,
+  popularGames,
+  regameDays,
   peakRank,
   resizeSession,
   sizedMission,
@@ -253,9 +256,11 @@ export function DailyPromo() {
             <Seg id="dp-ann" label="Announcements" value={plan.announceMode} options={[{ id: 'per-session', label: 'One per session' }, { id: 'per-day', label: 'One per day' }]} onChange={(announceMode) => setPlan((pl) => ({ ...pl, announceMode }))} />
           </Field>
         </Grid>
-        <Field label="Games next to Aviator">
+        <Field label="Games next to Aviator (by popularity)">
           <div className="k-checks">
-            {PLAN_GAMES.filter((g) => g !== 'aviator').map((g) => (
+            {PLAN_GAMES.filter((g) => g !== 'aviator')
+              .sort((a, b) => (plan.popularity[b] ?? -1) - (plan.popularity[a] ?? -1))
+              .map((g) => (
               <label key={g}>
                 <input
                   type="checkbox"
@@ -266,8 +271,13 @@ export function DailyPromo() {
                   }}
                 />
                 {gameName(g)}
+                {plan.popularity[g] != null && <small className="k-muted">{plan.popularity[g]}%</small>}
               </label>
             ))}
+            <label className="dp-weighted">
+              <input type="checkbox" checked={plan.popularityWeighted} onChange={(e) => setPlan((pl) => regameDays({ ...pl, popularityWeighted: e.target.checked }))} />
+              Popular games more often
+            </label>
           </div>
         </Field>
         <div className="k-row">
@@ -934,7 +944,7 @@ function SessionCard({
             </div>
           );
         })}
-        <button type="button" className="k-link" onClick={() => onSession((x) => ({ ...x, missions: [...x.missions, newMission(x.missions.some((y) => y.game === 'aviator') ? plan.template.rotation[0] ?? 'plinko' : 'aviator', x.durationMin, plan.template.slotsPerMission, plan.feasibility)] }))}>
+        <button type="button" className="k-link" onClick={() => onSession((x) => ({ ...x, missions: [...x.missions, newMission(x.missions.some((y) => y.game === 'aviator') ? (popularGames(plan.popularity).find((g) => !x.missions.some((y) => y.game === g)) ?? plan.template.rotation[0] ?? 'mines') : 'aviator', x.durationMin, plan.template.slotsPerMission, plan.feasibility)] }))}>
           + Add mission
         </button>
       </div>
@@ -1204,8 +1214,10 @@ function Assumptions({ plan, setPlan, tz }: { plan: DailyPlan; setPlan: (fn: (pl
     { what: 'Aviator round length', value: `${meanRoundSec(DEFAULT_CLOCK).toFixed(1)} s average (5 s betting + flight + 1.5 s pause)`, kind: 'Model assumption', note: 'Public measurements; Spribe does not publish timing.' },
     { what: 'Two Aviator bets in one round', value: 'Same outcome', kind: 'Model assumption', note: 'They share the crash point, so they are never two independent chances.' },
     { what: 'Plinko, Keno, Mines, Goal chances per bet', value: 'Exact', kind: 'Observed data', note: 'Published paytables and game rules. The Aviator formula is never used for them.' },
-    { what: 'Trader, Pilot Chicken, Keno 80', value: 'No model', kind: 'Not used', note: 'Insufficient data unless you enter a chance per bet.' },
-    { what: 'Bets per minute (non-Aviator)', value: EXACT_GAMES.map((g) => `${gameName(g)} ${betsPerMinFor(g, a)}`).join(', '), kind: 'Model assumption', note: 'Editable below.' },
+    { what: 'Pilot Chicken, Trader chances per bet', value: '97% ÷ X', kind: 'Model assumption', note: 'RTP rule for cash-out games with a constant 97% RTP; each player’s own result, not Aviator’s shared rounds.' },
+    { what: 'Keno 80', value: 'No model', kind: 'Not used', note: 'Insufficient data unless you enter a chance per bet.' },
+    { what: 'Game popularity (1-month retention)', value: POPULARITY.filter((r) => r.game).map((r) => `${r.name} ${plan.popularity[r.game!] ?? r.retention}%`).join(', '), kind: 'Observed data', note: `${POPULARITY_SOURCE}. Decides which games are used and how often; edit below when it changes. Bets per player shown below are not used for timing (the period is not stated). "Pilot" read as Pilot Chicken.` },
+    { what: 'Bets per minute (non-Aviator)', value: MODEL_GAMES.map((g) => `${gameName(g)} ${betsPerMinFor(g, a)}`).join(', '), kind: 'Model assumption', note: 'Editable below.' },
     { what: 'Busiest hours', value: 'UTC 22, 21, 23, 20, 19, 18, 12, 11, 13, 16 …', kind: 'Observed data', note: `Your ranking; converted to ${tz || 'UTC'} for session placement and the timeline shading.` },
     { what: 'Active players, attempt share', value: plan.audience.activePlayers == null ? 'not entered' : `${plan.audience.activePlayers}, ${plan.audience.attemptShare ?? '?'}%`, kind: 'User input', note: 'Needed for completions, fill chance, fill time and unfilled slots.' },
     { what: 'Feasibility band', value: `${f.minP}–${f.maxP}% finish; typical finish at ${f.minFill}–${f.maxFill}% of the window`, kind: 'Heuristic', note: 'Used to rank suggestions; not a rule.' },
@@ -1243,10 +1255,54 @@ function Assumptions({ plan, setPlan, tz }: { plan: DailyPlan; setPlan: (fn: (pl
         <NumberField id="dp-f-maxp" label="Finish chance to" suffix="%" value={f.maxP} onChange={(v) => v != null && setF({ maxP: v })} />
         <NumberField id="dp-f-minfill" label="Typical finish from" suffix="% of window" value={f.minFill} onChange={(v) => v != null && setF({ minFill: v })} />
         <NumberField id="dp-f-maxfill" label="Typical finish to" suffix="% of window" value={f.maxFill} onChange={(v) => v != null && setF({ maxFill: v })} />
-        {EXACT_GAMES.map((g) => (
+        {MODEL_GAMES.map((g) => (
           <NumberField key={g} id={`dp-bpm-${g}`} label={`${gameName(g)} bets / min`} min={0.1} value={betsPerMinFor(g, a)} onChange={(v) => v != null && v > 0 && setPlan((pl) => ({ ...pl, audience: { ...pl.audience, betsPerMin: { ...pl.audience.betsPerMin, [g]: v } } }))} />
         ))}
       </Grid>
+      <div className="k-tablewrap">
+        <table className="k-table" id="dp-popularity">
+          <caption className="k-small k-muted" style={{ textAlign: 'left' }}>
+            Game popularity · {POPULARITY_SOURCE}
+          </caption>
+          <thead>
+            <tr>
+              <th>Game</th>
+              <th className="num">1-month retention %</th>
+              <th className="num">Bets per player</th>
+              <th>In the planner</th>
+            </tr>
+          </thead>
+          <tbody>
+            {POPULARITY.map((r) => (
+              <tr key={r.name}>
+                <td>{r.name}</td>
+                <td className="num">
+                  {r.game ? (
+                    <input
+                      aria-label={`${r.name} retention`}
+                      type="number"
+                      min={0}
+                      step="any"
+                      value={plan.popularity[r.game] ?? ''}
+                      onChange={(e) => {
+                        const v = e.target.value === '' ? null : Number(e.target.value);
+                        if (v != null && v >= 0) setPlan((pl) => regameDays({ ...pl, popularity: { ...pl.popularity, [r.game!]: v } }));
+                      }}
+                    />
+                  ) : (
+                    r.retention
+                  )}
+                </td>
+                <td className="num">{r.betsPerPlayer}</td>
+                <td>{r.game ? (plan.template.rotation.includes(r.game) ? <Chip tone="ok">used</Chip> : <Chip tone="muted">available</Chip>) : <Chip tone="muted">not in toolkit yet</Chip>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <button type="button" className="k-link" onClick={() => setPlan((pl) => regameDays({ ...pl, popularity: { ...DEFAULT_POPULARITY }, template: { ...pl.template, rotation: popularGames(DEFAULT_POPULARITY) } }))}>
+        Reset games to the supplied data
+      </button>
     </Section>
   );
 }

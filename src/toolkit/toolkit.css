@@ -295,3 +295,4 @@ textarea[readonly] { opacity: 0.75; }
 .dp-boost { font-family: var(--font-mono); font-size: 0.72rem; padding: 1px 6px; border-radius: 999px; }
 .dp-boost.up { color: var(--ok); background: var(--ok-soft); }
 .dp-boost.down { color: var(--muted); background: var(--surface); }
+.dp-weighted { margin-left: auto; color: var(--model); }

@@ -15,8 +15,11 @@
 // from the published paytables / game rules already in the toolkit
 // (chanceAtLeast). The Aviator formula is never used for them.
 //
-// Trader, Pilot Chicken, Keno 80: no verified per-bet model here, so they show
-// "Insufficient data" unless the operator types a chance per bet.
+// Pilot Chicken, Trader: cash-out games with a constant 97% RTP, so cashing
+// out at X× succeeds 97% ÷ X of the time for each player's own bet (RTP rule,
+// a model assumption, not Aviator's shared rounds).
+// Keno 80: no verified per-bet model, so it shows "Insufficient data" unless
+// the operator types a chance per bet.
 //
 // Nothing here depends on the stake. A bigger bet changes what a player wins,
 // never the chance of a multiplier.
@@ -30,13 +33,21 @@ export const GAME_BY_ID: Record<string, SimGame> = Object.fromEntries(SIM_GAMES.
 
 /** Games whose per-bet chance comes from a published paytable or rules. */
 export const EXACT_GAMES: GameId[] = ['plinko', 'mines', 'goal', 'keno'];
+/**
+ * Cash-out games with a constant 97% RTP: cashing out at X× must succeed
+ * RTP ÷ X of the time (otherwise the return at X× would not be the RTP).
+ * Each player's own result; not Aviator's shared rounds. Model assumption.
+ */
+export const RTP_GAMES: GameId[] = ['pilot-chicken', 'trader'];
+/** Every game the planner can estimate (besides Aviator). */
+export const MODEL_GAMES: GameId[] = [...EXACT_GAMES, ...RTP_GAMES];
 
 export type ModelKind = 'shared-round' | 'own-bet' | 'none';
 
 export function modelKind(game: GameId, chanceOverride: number | null): ModelKind {
   if (game === 'aviator') return 'shared-round';
   if (chanceOverride != null && chanceOverride > 0 && chanceOverride <= 1) return 'own-bet';
-  return EXACT_GAMES.includes(game) ? 'own-bet' : 'none';
+  return MODEL_GAMES.includes(game) ? 'own-bet' : 'none';
 }
 
 export interface EstMission {
@@ -71,7 +82,8 @@ export const aviatorRoundChance = (x: number, c: AviatorClock = DEFAULT_CLOCK) =
 export function ownBetChance(m: EstMission): number | null {
   if (m.chanceOverride != null && m.chanceOverride > 0 && m.chanceOverride <= 1) return m.chanceOverride;
   const g = GAME_BY_ID[m.game];
-  if (!g || !EXACT_GAMES.includes(m.game) || m.threshold == null) return null;
+  if (!g || !MODEL_GAMES.includes(m.game) || m.threshold == null) return null;
+  if (RTP_GAMES.includes(m.game)) return m.threshold > g.maxMultiplier ? 0 : Math.min(1, g.rtp / Math.max(1, m.threshold));
   const p = chanceAtLeast(g, m.threshold).p;
   return p > 0 ? p : 0;
 }
@@ -184,7 +196,7 @@ export function searchFits(game: GameId, windowMin: number, f: Feasibility = DEF
   const out: (Suggestion & { score: number })[] = [];
   for (const x of THRESHOLDS) {
     if (x > g.maxMultiplier) continue;
-    if (game !== 'aviator' && base.chanceOverride == null && chanceAtLeast(g, x).p <= 0) continue;
+    if (game !== 'aviator' && base.chanceOverride == null && (ownBetChance({ game, threshold: x, catches: 1, countPer: 'round', chanceOverride: null }) ?? 0) <= 0) continue;
     for (let k = 1; k <= 30; k++) {
       const m: EstMission = { game, threshold: x, catches: k, countPer: base.countPer ?? 'round', chanceOverride: base.chanceOverride ?? null };
       const p = individualChance(m, windowMin, a);

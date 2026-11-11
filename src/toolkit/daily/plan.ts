@@ -4,10 +4,19 @@
 // planner, Promo Checker, T&C Generator and exports never disagree.
 
 import type { GameId } from '../../data/games';
-import { DEFAULT_FEASIBILITY, EXACT_GAMES, searchFits, type Feasibility } from './estimate';
+import { DEFAULT_POPULARITY, POPULAR_CUTOFF } from '../../data/gamePopularity';
+import { DEFAULT_FEASIBILITY, MODEL_GAMES, searchFits, type Feasibility } from './estimate';
 
-/** v2: sessions can be weighted by length (v1 plans move from equal to by-length). */
-export const DAILY_VERSION = 2;
+/**
+ * v2: sessions can be weighted by length (v1 plans move from equal to by-length).
+ * v3: games follow the regional popularity data (older plans on the old default list move to it).
+ */
+export const DAILY_VERSION = 3;
+
+/** Popular games with a chance model, most popular first (default rotation). */
+export const popularGames = (pop: Record<string, number> = DEFAULT_POPULARITY): GameId[] =>
+  (Object.keys(pop) as GameId[]).filter((g) => MODEL_GAMES.includes(g) && pop[g] >= POPULAR_CUTOFF).sort((a, b) => pop[b] - pop[a]);
+const OLD_DEFAULT_ROTATION = ['plinko', 'mines', 'goal', 'keno'];
 
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 
@@ -97,6 +106,10 @@ export interface DailyPlan {
   closeMode: 'when-filled' | 'scheduled-end';
   policies: Record<PolicyKey, string>;
   useInTc: boolean;
+  /** 1-month retention by game (regional data, editable). */
+  popularity: Record<string, number>;
+  /** Popular games appear more often, in proportion to retention. */
+  popularityWeighted: boolean;
 }
 
 export const MIN_LEAD = 40;
@@ -122,7 +135,7 @@ export function defaultPlan(): DailyPlan {
   const plan: DailyPlan = {
     version: DAILY_VERSION,
     days: [],
-    template: { sessionsPerDay: 4, missionsPerSession: 2, durationMin: 15, slotsPerMission: 10, bundleSlots: 10, rotation: [...EXACT_GAMES], gapMin: 0 },
+    template: { sessionsPerDay: 4, missionsPerSession: 2, durationMin: 15, slotsPerMission: 10, bundleSlots: 10, rotation: popularGames(), gapMin: 0 },
     rewardMode: 'independent',
     leadMin: MIN_LEAD,
     announceMode: 'per-session',
@@ -140,6 +153,8 @@ export function defaultPlan(): DailyPlan {
     closeMode: 'when-filled',
     policies: blankPolicies(),
     useInTc: true,
+    popularity: { ...DEFAULT_POPULARITY },
+    popularityWeighted: true,
   };
   return setLength(plan, 7, '');
 }
@@ -164,12 +179,52 @@ export function newMission(game: GameId, durationMin: number, slots: number, f?:
 }
 
 /** Session #globalIndex: Aviator first, then the rotating games. */
-export function templateSession(plan: Pick<DailyPlan, 'template' | 'feasibility'>, globalIndex: number, start: string): DSession {
+type RotationPlan = Pick<DailyPlan, 'template' | 'feasibility' | 'popularity' | 'popularityWeighted'>;
+
+const seqCache = new Map<string, GameId[]>();
+/**
+ * The order games appear in, session after session and day after day.
+ * Weighted: smooth weighted round-robin by retention, so a game with twice
+ * the retention comes up about twice as often, spread out rather than in runs.
+ */
+export function rotationSequence(plan: RotationPlan, length: number): GameId[] {
+  const rot = plan.template.rotation.length ? plan.template.rotation : popularGames(plan.popularity);
+  const w = rot.map((g) => (plan.popularityWeighted ? Math.max(0.1, plan.popularity?.[g] ?? 1) : 1));
+  const key = `${rot.join(',')}|${w.join(',')}`;
+  let seq = seqCache.get(key) ?? [];
+  if (seq.length < length) {
+    seq = [];
+    const cur = rot.map(() => 0);
+    const total = w.reduce((a, b) => a + b, 0);
+    for (let i = 0; i < Math.max(length, 64); i++) {
+      let best = 0;
+      for (let k = 0; k < rot.length; k++) {
+        cur[k] += w[k];
+        if (cur[k] > cur[best] + 1e-9) best = k;
+      }
+      cur[best] -= total;
+      seq.push(rot[best]);
+    }
+    seqCache.set(key, seq);
+  }
+  return seq;
+}
+
+/** Games for session #globalIndex after Aviator: next in the sequence, no repeats inside a session. */
+export function sessionGames(plan: RotationPlan, globalIndex: number, count: number): GameId[] {
+  const per = Math.max(1, plan.template.missionsPerSession - 1);
+  const seq = rotationSequence(plan, (globalIndex + 1) * per + count * 4 + 8);
+  const out: GameId[] = [];
+  for (let k = globalIndex * per; out.length < count && k < seq.length; k++) if (!out.includes(seq[k]) || new Set(seq).size <= out.length) out.push(seq[k]);
+  return out;
+}
+
+export function templateSession(plan: RotationPlan, globalIndex: number, start: string): DSession {
   const t = plan.template;
-  const rot = t.rotation.length ? t.rotation : EXACT_GAMES;
+  const others = sessionGames(plan, globalIndex, Math.max(0, t.missionsPerSession - 1));
   const missions: DMission[] = [];
   for (let j = 0; j < Math.max(1, t.missionsPerSession); j++) {
-    const game: GameId = j === 0 ? 'aviator' : rot[(globalIndex + j - 1) % rot.length];
+    const game: GameId = j === 0 ? 'aviator' : others[j - 1];
     missions.push(newMission(game, t.durationMin, t.slotsPerMission, plan.feasibility));
   }
   return { id: uid(), start, durationMin: t.durationMin, missions, leadMin: null, bundleSlots: null, weight: null };
@@ -181,6 +236,28 @@ export function resizeSession(s: DSession, durationMin: number, f?: Feasibility)
     ...s,
     durationMin,
     missions: s.missions.map((m) => (m.kind === 'catch' && m.chanceOverride == null ? { ...m, ...sizedMission(m.game, durationMin, f) } : m)),
+  };
+}
+
+/** Re-picks the non-Aviator games of days that follow the settings, keeping their times and slots. */
+export function regameDays(plan: DailyPlan): DailyPlan {
+  let g = 0;
+  return {
+    ...plan,
+    days: plan.days.map((d) => {
+      if (d.edited) {
+        g += d.sessions.length;
+        return d;
+      }
+      return {
+        ...d,
+        sessions: d.sessions.map((s) => {
+          const games = sessionGames(plan, g++, s.missions.length - 1);
+          let k = 0;
+          return { ...s, missions: s.missions.map((m, i) => (i === 0 && m.game === 'aviator' ? m : { ...m, game: games[k] ?? m.game, ...sizedMission(games[k++] ?? m.game, s.durationMin, plan.feasibility) })) };
+        }),
+      };
+    }),
   };
 }
 
@@ -539,7 +616,14 @@ export function normalizeDaily(raw: unknown): NormalizeResult {
     closeMode: r.closeMode === 'scheduled-end' ? 'scheduled-end' : 'when-filled',
     policies: { repeatWinners: str(pol.repeatWinners), unfilledSlots: str(pol.unfilledSlots), unawardedFunds: str(pol.unawardedFunds), ties: str(pol.ties), selection: str(pol.selection) },
     useInTc: r.useInTc !== false,
+    popularity: typeof r.popularity === 'object' && r.popularity ? { ...DEFAULT_POPULARITY, ...(r.popularity as Record<string, number>) } : { ...DEFAULT_POPULARITY },
+    popularityWeighted: r.popularityWeighted !== false,
   };
+  // v3: plans still on the old default game list move to the popular games.
+  if (version < 3 && plan.template.rotation.join(',') === OLD_DEFAULT_ROTATION.join(',')) {
+    plan.template = { ...plan.template, rotation: popularGames(plan.popularity) };
+    if (plan.days.length) return { plan: regameDays(plan), warnings };
+  }
   if (!plan.days.length) return { plan: setLength(plan, 7, ''), warnings };
   return { plan, warnings };
 }

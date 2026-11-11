@@ -258,8 +258,8 @@ describe('Daily Promo: estimator', () => {
     expect(perBet).toBeCloseTo(all, 12);
   });
   it('games without a model give no number; others use their own paytables', () => {
-    expect(individualChance({ game: 'trader', threshold: 10, catches: 1, countPer: 'round', chanceOverride: null }, 15)).toBeNull();
-    expect(individualChance({ game: 'trader', threshold: 10, catches: 1, countPer: 'round', chanceOverride: 0.05 }, 15)).not.toBeNull();
+    expect(individualChance({ game: 'keno-80', threshold: 10, catches: 1, countPer: 'round', chanceOverride: null }, 15)).toBeNull();
+    expect(individualChance({ game: 'keno-80', threshold: 10, catches: 1, countPer: 'round', chanceOverride: 0.05 }, 15)).not.toBeNull();
     expect(individualChance({ game: 'plinko', threshold: 5, catches: 2, countPer: 'round', chanceOverride: null }, 15)).toBeGreaterThan(0);
   });
   it('12. no audience → insufficient data, never a forecast', () => {
@@ -293,7 +293,7 @@ describe('Daily Promo: estimator', () => {
       expect(x.chance).toBeLessThanOrEqual(0.75);
       expect(x.why).toMatch(/rounds reach/);
     }
-    expect(searchFits('trader', 15)).toEqual([]);
+    expect(searchFits('keno-80', 15)).toEqual([]);
   });
 });
 
@@ -365,5 +365,41 @@ describe('Daily Promo: prizes follow peak hours', () => {
     // amount per length scales with the hour too
     const b = allocate({ ...p, prizeMode: 'per-length', lengthAmounts: { '10': 100, '15': 100, '20': 100 } }, null, 'USD', 'UTC');
     expect(b.sessionsMinor[0]![2]).toBe(15000);
+  });
+});
+
+describe('Daily Promo: popular games', () => {
+  it('uses only popular games next to Aviator, more popular ones more often', async () => {
+    const { popularGames } = await import('./plan');
+    expect(popularGames()).toEqual(['pilot-chicken', 'mines', 'keno', 'trader', 'goal']);
+    const p = defaultPlan();
+    const games = p.days.flatMap((d) => d.sessions.map((s) => s.missions[1].game));
+    const count = (g: string) => games.filter((x) => x === g).length;
+    expect(new Set(games)).toEqual(new Set(['pilot-chicken', 'mines', 'keno', 'trader', 'goal']));
+    expect(count('pilot-chicken')).toBeGreaterThan(count('goal'));
+    expect(count('mines')).toBeGreaterThan(count('goal'));
+    // spread out: no game twice in a row
+    for (let i = 1; i < games.length; i++) expect(games[i]).not.toBe(games[i - 1]);
+    // each day differs from the day before
+    for (let d = 1; d < p.days.length; d++) expect(p.days[d].sessions.map((s) => s.missions[1].game)).not.toEqual(p.days[d - 1].sessions.map((s) => s.missions[1].game));
+  });
+  it('no repeated game inside a session with 3+ missions', () => {
+    const p = setTemplate(defaultPlan(), { missionsPerSession: 4 }, 'UTC');
+    for (const d of p.days) for (const s of d.sessions) expect(new Set(s.missions.map((m) => m.game)).size).toBe(4);
+  });
+  it('Pilot Chicken and Trader get estimates from the 97% RTP rule', () => {
+    const c = individualChance({ game: 'pilot-chicken', threshold: 10, catches: 2, countPer: 'round', chanceOverride: null }, 15);
+    expect(c).toBeGreaterThan(0);
+    expect(searchFits('trader', 15).length).toBeGreaterThan(0);
+  });
+  it('older plans on the old game list move to the popular games, keeping times', () => {
+    const old = defaultPlan();
+    old.version = 2;
+    old.template = { ...old.template, rotation: ['plinko', 'mines', 'goal', 'keno'] };
+    old.days[0].sessions[0].start = '18:30';
+    const n = normalizeDaily(old).plan;
+    expect(n.template.rotation).toEqual(['pilot-chicken', 'mines', 'keno', 'trader', 'goal']);
+    expect(n.days[0].sessions[0].start).toBe('18:30');
+    expect(n.days[0].sessions[0].missions[0].game).toBe('aviator');
   });
 });

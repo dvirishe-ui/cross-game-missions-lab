@@ -8,6 +8,7 @@ import { DEFAULT_CLOCK, chanceAtLeastHits, meanRoundSec, roundsPerHour } from '.
 import { verifyAviatorRound } from './provablyFair';
 import { simulateAsync } from './simClient';
 import { FITTED_SPEED, FIT_DAYS, playersFor, runsFor } from './days';
+import { popularGames } from '../toolkit/daily/plan';
 import { CROSS_PROVIDER, marketGames, randomTimedSet, suggestedSet, variedSet } from './generate';
 import { GAME_RANKING } from '../data/gameRanking';
 import { goneByCurve, ROUND_GAMES, simulateDay, suggestTarget, tuneToTarget, type Suggestion, type TimerResult, type TimerSettings } from './model';
@@ -113,7 +114,9 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
   const [presses, setPresses] = useState(0);
   const [country, setCountry] = useState(init?.country ?? countryIn(bridge?.marketHint));
   const ranking = country ? GAME_RANKING[country] : undefined;
-  const market = ranking ? marketGames(ranking) : undefined;
+  // No country: lean on the popular games from the regional data (Aviator always first). '__all' = every game.
+  const popular: GameId[] = ['aviator', ...popularGames()];
+  const market = ranking ? marketGames(ranking) : country === '__all' ? undefined : popular;
   const [crossBoost, setCrossBoost] = useState(init?.crossBoost ?? true);
   const boost = crossBoost ? CROSS_PROVIDER : [];
   const clock = DEFAULT_CLOCK;
@@ -379,7 +382,8 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
               Which market?
             </label>
             <select id="market" value={country} onChange={(e) => setCountry(e.target.value)}>
-              <option value="">Any market</option>
+              <option value="">Popular games (regional data)</option>
+              <option value="__all">All games</option>
               {COUNTRIES.map((c) => (
                 <option key={c} value={c}>
                   {c}
@@ -407,7 +411,9 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
                 <em className="t-small">· bold = used in suggestions, italic = not in the calculator yet</em>
               </span>
             ) : (
-              <span className="t-muted t-small">Optional. Pick a country and suggestions use the games most played there (from the games ranking by country).</span>
+              <span className="t-muted t-small">
+                {country === '__all' ? 'Suggestions use every game the calculator can time.' : `Suggestions lean on the most popular games: ${popular.map((g) => GAMES[g].name).join(', ')} (more popular = more often).`}
+              </span>
             )}
           </div>
 
