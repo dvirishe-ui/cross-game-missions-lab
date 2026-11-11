@@ -301,3 +301,8 @@ textarea[readonly] { opacity: 0.75; }
 .dp-mission .k-task select { flex: 0 1 100px; min-width: 80px; padding-inline: 8px 20px; }
 .dp-mission .k-task select.dp-kind { flex: 0 0 92px !important; min-width: 92px !important; }
 .dp-mission .k-task input { width: 50px; padding-inline: 6px; }
+.dp-win { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; font-size: 0.8rem; color: var(--muted); padding: 0 4px 2px 10px; }
+.dp-win input { width: 56px; padding-inline: 6px; font-size: 0.82rem; }
+.dp-pay { font-family: var(--font-mono); color: var(--ok); }
+.dp-pool { font-family: var(--font-mono); font-weight: 600; color: var(--ok); }
+.dp-win input[aria-label^='Money'] { width: 76px; }

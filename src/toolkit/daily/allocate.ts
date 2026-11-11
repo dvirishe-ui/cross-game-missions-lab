@@ -89,7 +89,64 @@ const slotWeights = (plan: DailyPlan, n: number) => Array.from({ length: n }, (_
 
 const slotsOf = (plan: DailyPlan, s: DSession, mi: number) => (mi < 0 ? (s.bundleSlots ?? plan.template.bundleSlots) : (s.missions[mi]?.slots ?? 0));
 
+/**
+ * Money set per mission: each mission pays its own amount to each of its winners.
+ * Pool = winners × amount; the budget is the sum of every pool. Independent missions only.
+ */
+function allocatePerMission(plan: DailyPlan, currency: string): Allocation {
+  const flags: string[] = [];
+  const ready = !!currency.trim() && plan.days.every((d) => d.sessions.every((s) => s.missions.every((m) => (m.prize ?? 0) > 0)));
+  const each = (m: DSession['missions'][number]) => (ready ? toMinor(m.prize!, currency) : null);
+  const poolW = (m: DSession['missions'][number]) => (m.prize ?? 0) * (m.slots ?? 0);
+  const total = plan.days.reduce((a, d) => a + d.sessions.reduce((b, s) => b + s.missions.reduce((c, m) => c + poolW(m), 0), 0), 0);
+  const budgetMinor = ready ? plan.days.reduce((a, d) => a + d.sessions.reduce((b, s) => b + s.missions.reduce((c, m) => c + each(m)! * Math.max(0, Math.floor(m.slots ?? 0)), 0), 0), 0) : null;
+  const share = (w: number) => (total > 0 ? w / total : 0);
+  const pools: PoolAlloc[] = [];
+  const sessionShares: number[][] = [];
+  const sessionsMinor: (number | null)[][] = [];
+  const dayShares: number[] = [];
+  const daysMinor: (number | null)[] = [];
+  plan.days.forEach((d, di) => {
+    const sShares: number[] = [];
+    const sMinor: (number | null)[] = [];
+    d.sessions.forEach((s, si) => {
+      let sw = 0;
+      let smin = 0;
+      s.missions.forEach((m, mi) => {
+        const n = Math.max(0, Math.floor(m.slots ?? 0));
+        const per = each(m);
+        const minor = per != null ? per * n : null;
+        sw += poolW(m);
+        smin += minor ?? 0;
+        pools.push({
+          key: `${di}-${si}-${mi}`,
+          day: di,
+          session: si,
+          mission: mi,
+          label: `Day ${di + 1} · Session ${si + 1} · Mission ${mi + 1}`,
+          share: share(poolW(m)),
+          minor,
+          slots: n,
+          payouts: Array.from({ length: n }, () => ({ share: share(m.prize ?? 0), minor: per })),
+          remainder: 0,
+          short: false,
+        });
+      });
+      sShares.push(share(sw));
+      sMinor.push(ready ? smin : null);
+    });
+    sessionShares.push(sShares);
+    sessionsMinor.push(sMinor);
+    dayShares.push(sShares.reduce((a, b) => a + b, 0));
+    daysMinor.push(ready ? sMinor.reduce((a: number, b) => a + (b ?? 0), 0) : null);
+  });
+  if (!ready) flags.push(`Enter money per winner for every mission${currency.trim() ? '' : ' and a currency'} to see the total.`);
+  if (pools.some((p) => !p.slots)) flags.push('Some missions have no winners.');
+  return { budgetMinor, dayShares, daysMinor, sessionShares, sessionsMinor, pools, totalMinor: budgetMinor, flags };
+}
+
 export function allocate(plan: DailyPlan, budget: number | null, currency: string, tz = ''): Allocation {
+  if (plan.prizeMode === 'per-mission' && plan.rewardMode === 'independent') return allocatePerMission(plan, currency);
   const flags: string[] = [];
   // Amount per session length: each session gets its own amount; the budget is their sum.
   const perLength = plan.prizeMode === 'per-length';

@@ -44,6 +44,8 @@ export interface DMission {
   chanceOverride: number | null;
   /** Custom share weight inside its session (null = 1). */
   weight: number | null;
+  /** Money per winner, when prizes are set per mission. */
+  prize: number | null;
 }
 
 export interface DSession {
@@ -94,7 +96,7 @@ export interface DailyPlan {
   /** Weight per session length in minutes, used when sessions are weighted by length. */
   lengthWeights: Record<string, number>;
   /** 'budget': split a total. 'per-length': a set amount per session by its length (10 min = X, 20 min = Y). */
-  prizeMode: 'budget' | 'per-length';
+  prizeMode: 'budget' | 'per-length' | 'per-mission';
   /** Prize by time of day: busier hours (from the activity ranking) pay more, the same, or less. */
   prizeByHour: 'peak' | 'even' | 'offpeak';
   /** How strongly the hour moves the prize, percent (50 = busiest hour ≈ 1.5×, quietest ≈ 0.5×). */
@@ -196,7 +198,7 @@ export function sizedMission(game: GameId, durationMin: number, f: Feasibility =
 }
 
 export function newMission(game: GameId, durationMin: number, slots: number, f?: Feasibility, kind: DMission['kind'] = 'catch'): DMission {
-  return { id: uid(), game, kind, ...sizedMission(game, durationMin, f, kind), slots, minBet: null, countPer: 'round', chanceOverride: null, weight: null };
+  return { id: uid(), game, kind, ...sizedMission(game, durationMin, f, kind), slots, minBet: null, countPer: 'round', chanceOverride: null, weight: null, prize: null };
 }
 
 /** Session #globalIndex: Aviator first, then the rotating games. */
@@ -577,6 +579,7 @@ export function normalizeDaily(raw: unknown): NormalizeResult {
       countPer: x.countPer === 'bet' ? 'bet' : 'round',
       chanceOverride: numOrNull(x.chanceOverride),
       weight: numOrNull(x.weight),
+      prize: numOrNull(x.prize),
     };
   };
   const session = (s: unknown): DSession => {
@@ -620,7 +623,7 @@ export function normalizeDaily(raw: unknown): NormalizeResult {
     opStart: str(r.opStart),
     opEnd: str(r.opEnd),
     weights: { day: wm(w.day), session: w.session === 'custom' ? 'custom' : w.session === 'equal' && version >= 2 ? 'equal' : 'length', mission: wm(w.mission) },
-    prizeMode: r.prizeMode === 'per-length' ? 'per-length' : 'budget',
+    prizeMode: r.prizeMode === 'per-length' ? 'per-length' : r.prizeMode === 'per-mission' ? 'per-mission' : 'budget',
     prizeByHour: r.prizeByHour === 'even' ? 'even' : r.prizeByHour === 'offpeak' ? 'offpeak' : 'peak',
     peakStrength: num(r.peakStrength, 50, 0, 100),
     lengthAmounts: { '10': null, '15': null, '20': null, ...(typeof r.lengthAmounts === 'object' && r.lengthAmounts ? Object.fromEntries(Object.entries(r.lengthAmounts as Record<string, unknown>).map(([k, v]) => [k, numOrNull(v)])) : {}) },

@@ -452,3 +452,31 @@ describe('Daily Promo: collect and place bets', () => {
     expect(normalizeDaily(JSON.parse(JSON.stringify(p))).plan.days[0].sessions[0].missions[1].kind).toBe('collect');
   });
 });
+
+describe('Daily Promo: winners and money per mission', () => {
+  it('each mission pays its own amount to its own winners; total = sum', () => {
+    let p: DailyPlan = { ...defaultPlan(), prizeMode: 'per-mission' };
+    p = { ...p, days: p.days.map((d) => ({ ...d, sessions: d.sessions.map((s) => ({ ...s, missions: s.missions.map((m, k) => ({ ...m, prize: k === 0 ? 20 : 5 })) })) })) };
+    // Day 2, session 1, mission 2 varies: 25 winners at $8
+    p = editDay(p, 1, (d) => ({ ...d, sessions: d.sessions.map((s, j) => (j === 0 ? { ...s, missions: s.missions.map((m, k) => (k === 1 ? { ...m, slots: 25, prize: 8 } : m)) } : s)) }));
+    const a = allocate(p, 999999, 'USD', 'UTC');
+    const pool = (d: number, s: number, m: number) => a.pools.find((x) => x.day === d && x.session === s && x.mission === m)!;
+    expect(pool(0, 0, 0).minor).toBe(20000); // 10 × $20
+    expect(pool(0, 0, 0).payouts.every((x) => x.minor === 2000)).toBe(true);
+    expect(pool(1, 0, 1).minor).toBe(20000); // 25 × $8
+    expect(pool(1, 0, 1).slots).toBe(25);
+    expect(pool(0, 0, 1).slots).toBe(10); // other days unchanged
+    const expected = 28 * (10 * 2000 + 10 * 500) - 10 * 500 + 25 * 800;
+    expect(a.budgetMinor).toBe(expected);
+    expect(a.totalMinor).toBe(expected);
+    expect(a.pools.reduce((s, x) => s + x.share, 0)).toBeCloseTo(1, 9);
+  });
+  it('a missing amount shows no money, and money per mission survives save/load', () => {
+    const p = { ...defaultPlan(), prizeMode: 'per-mission' as const };
+    expect(allocate(p, null, 'USD').budgetMinor).toBeNull();
+    p.days[0].sessions[0].missions[0].prize = 12.5;
+    const n = normalizeDaily(JSON.parse(JSON.stringify(p))).plan;
+    expect(n.prizeMode).toBe('per-mission');
+    expect(n.days[0].sessions[0].missions[0].prize).toBe(12.5);
+  });
+});

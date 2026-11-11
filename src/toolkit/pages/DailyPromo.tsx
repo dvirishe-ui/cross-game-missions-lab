@@ -124,7 +124,8 @@ export function DailyPromo() {
   const hasMoney = alloc.budgetMinor != null;
 
   // With an amount per session length, the campaign total is their sum: keep the shared budget in step.
-  const perLengthTotal = plan.prizeMode === 'per-length' && alloc.budgetMinor != null ? fromMinor(alloc.budgetMinor, currency) : null;
+  const perMission = plan.prizeMode === 'per-mission' && plan.rewardMode === 'independent';
+  const perLengthTotal = (plan.prizeMode === 'per-length' || perMission) && alloc.budgetMinor != null ? fromMinor(alloc.budgetMinor, currency) : null;
   useEffect(() => {
     if (perLengthTotal != null && perLengthTotal !== budget) update((x) => ({ ...x, prizes: { ...x.prizes, totalPool: perLengthTotal } }));
   }, [perLengthTotal]);
@@ -145,6 +146,13 @@ export function DailyPromo() {
   const editMission = (si: number, mi: number, patch: Partial<DMission>) => editSession(si, (s) => ({ ...s, missions: s.missions.map((m, k) => (k === mi ? { ...m, ...patch } : m)) }));
 
   const dayRows = rows.filter((r) => r.dayIndex === di);
+  const missionPay = (si: number, mi: number) => {
+    const pool = alloc.pools.find((x) => x.day === di && x.session === si && x.mission === mi);
+    const first = pool?.payouts[0];
+    if (!first) return null;
+    if (first.minor != null) return plan.payout === 'ranked' && !perMission ? `${money(first.minor)} top` : `${money(first.minor)} each`;
+    return `${pct(first.share, 3)} each`;
+  };
   const sessionPrize = (si: number) => {
     const pools = alloc.pools.filter((x) => x.day === di && x.session === si);
     if (!pools.length) return null;
@@ -379,7 +387,9 @@ export function DailyPromo() {
                   peaks={freePeakStarts(plan, tz, day, si)}
                   isPeak={(peakRank(s.start, tz) ?? 99) < Math.max(6, day.sessions.length)}
                   prize={sessionPrize(si)}
-                  boost={plan.prizeByHour === 'even' ? null : peakFactor(plan, s.start, tz)}
+                  pay={(mi) => missionPay(si, mi)}
+                  perMission={perMission}
+                  boost={plan.prizeByHour === 'even' || perMission ? null : peakFactor(plan, s.start, tz)}
                   onSession={(fn) => editSession(si, fn)}
                   onMission={(mi, patch) => editMission(si, mi, patch)}
                   onRemove={() => editThisDay((d) => ({ ...d, sessions: d.sessions.filter((_, j) => j !== si) }))}
@@ -414,17 +424,38 @@ export function DailyPromo() {
               label="How prizes are set"
               value={plan.prizeMode}
               options={[
+                ...(plan.rewardMode === 'independent' ? [{ id: 'per-mission' as const, label: 'Set per mission' }] : []),
                 { id: 'per-length', label: 'Amount per session length' },
                 { id: 'budget', label: 'Split a total' },
               ]}
-              onChange={(prizeMode) => setPlan((pl) => ({ ...pl, prizeMode }))}
+              onChange={(prizeMode) =>
+                setPlan((pl) => {
+                  if (prizeMode !== 'per-mission') return { ...pl, prizeMode };
+                  // Start each mission from what it pays now, so switching changes nothing until edited.
+                  return {
+                    ...pl,
+                    prizeMode,
+                    days: pl.days.map((d, i) => ({
+                      ...d,
+                      sessions: d.sessions.map((s, j) => ({
+                        ...s,
+                        missions: s.missions.map((m, k) => {
+                          if (m.prize != null) return m;
+                          const per = alloc.pools.find((x) => x.day === i && x.session === j && x.mission === k)?.payouts[0]?.minor;
+                          return per != null ? { ...m, prize: fromMinor(per, currency) } : m;
+                        }),
+                      })),
+                    })),
+                  };
+                })
+              }
             />
           </Field>
           <TextField id="dp-currency" label="Currency" placeholder="USD" value={currency} onChange={(c) => update((x) => ({ ...x, prizes: { ...x.prizes, currency: c.toUpperCase() } }))} />
-          <Field label="Payout per slot">
+          {!perMission && <Field label="Payout per slot">
             <Seg label="Payout per slot" value={plan.payout} options={[{ id: 'equal', label: 'Equal' }, { id: 'ranked', label: 'Ranked' }]} onChange={(payout) => setPlan((pl) => ({ ...pl, payout }))} />
-          </Field>
-          <Field label="Prize by time of day">
+          </Field>}
+          {!perMission && <Field label="Prize by time of day">
             <Seg
               id="dp-by-hour"
               label="Prize by time of day"
@@ -436,11 +467,13 @@ export function DailyPromo() {
               ]}
               onChange={(prizeByHour) => setPlan((pl) => ({ ...pl, prizeByHour }))}
             />
-          </Field>
-          {plan.prizeByHour !== 'even' && (
+          </Field>}
+          {!perMission && plan.prizeByHour !== 'even' && (
             <NumberField id="dp-peak-strength" label="How much the hour counts" min={0} suffix="%" value={plan.peakStrength} onChange={(v) => v != null && setPlan((pl) => ({ ...pl, peakStrength: Math.min(100, Math.max(0, v)) }))} />
           )}
-          {plan.prizeMode === 'per-length' ? (
+          {perMission ? (
+            <p className="k-small k-muted dp-wrap" style={{ gridColumn: '1 / -1' }}>Set winners and money per winner on each mission, day by day. The total budget is the sum: {hasMoney ? money(alloc.budgetMinor) : 'enter money on every mission'}.</p>
+          ) : plan.prizeMode === 'per-length' ? (
             DURATIONS.map((n) => (
               <NumberField
                 key={n}
@@ -812,6 +845,8 @@ function SessionCard({
   isPeak,
   prize,
   boost,
+  pay,
+  perMission,
   onSession,
   onMission,
   onRemove,
@@ -832,6 +867,10 @@ function SessionCard({
   prize: string | null;
   /** Prize multiplier from the start hour (null = same at every hour). */
   boost: number | null;
+  /** Money (or share) per winner for mission mi. */
+  pay: (mi: number) => string | null;
+  /** Money per winner is typed on each mission. */
+  perMission: boolean;
   onSession: (fn: (s: DSession) => DSession) => void;
   onMission: (mi: number, patch: Partial<DMission>) => void;
   onRemove: () => void;
@@ -839,12 +878,7 @@ function SessionCard({
   const [fitsFor, setFitsFor] = useState<number | null>(null);
   const lead = row?.leadMin;
   const better = peaks.filter((x) => x !== s.start);
-  const slotText =
-    plan.rewardMode === 'bundle'
-      ? `${s.bundleSlots ?? plan.template.bundleSlots} shared slots`
-      : new Set(s.missions.map((m) => m.slots)).size === 1
-        ? `${s.missions[0]?.slots ?? '?'} slots per mission`
-        : s.missions.map((m) => m.slots ?? '?').join(' / ') + ' slots';
+  const slotText = plan.rewardMode === 'bundle' ? `${s.bundleSlots ?? plan.template.bundleSlots} shared winners · ` : '';
   return (
     <div className={`k-day dp-session ${issues.some((i) => i.level === 'error') ? 'has-err' : ''}`} id={`dp-session-${si}`}>
       <div className="k-day-head">
@@ -928,6 +962,24 @@ function SessionCard({
                   </button>
                 </span>
               </div>
+              {plan.rewardMode === 'independent' && (
+                <div className="dp-win">
+                  <label className="k-inline">
+                    <input aria-label={`Winners mission ${mi + 1}`} type="number" min={1} step={1} value={m.slots ?? ''} onChange={(e) => onMission(mi, { slots: num(e.target.value) })} />
+                    winners
+                  </label>
+                  {perMission ? (
+                    <label className="k-inline">
+                      ×
+                      <input aria-label={`Money per winner mission ${mi + 1}`} type="number" min={0} step="any" placeholder="0" value={m.prize ?? ''} onChange={(e) => onMission(mi, { prize: num(e.target.value) })} />
+                      {currency || ''} each
+                      {m.prize != null && m.slots != null && <b className="dp-pool">= {fmtMoney(m.prize * m.slots, currency)}</b>}
+                    </label>
+                  ) : (
+                    pay(mi) && <span className="dp-pay">· {pay(mi)}</span>
+                  )}
+                </div>
+              )}
               {noModel && m.kind !== 'bets' && (
                 <div className="dp-mission-more">
                   <span className="k-inline">
@@ -964,7 +1016,7 @@ function SessionCard({
           {row?.deadline && (
             <span className={lead != null && lead < MIN_LEAD ? 'bad' : ''}>
               {' '}
-              · announce by {row.prevDate && row.deadline.date ? `${validDate(row.deadline.date) ? fmtShort(row.deadline.date) : row.deadline.date} ` : ''}
+              announce by {row.prevDate && row.deadline.date ? `${validDate(row.deadline.date) ? fmtShort(row.deadline.date) : row.deadline.date} ` : ''}
               {row.deadline.time}
             </span>
           )}
@@ -976,13 +1028,7 @@ function SessionCard({
             <label className="k-inline">
               Shared slots <input type="number" min={1} value={s.bundleSlots ?? plan.template.bundleSlots} onChange={(e) => onSession((x) => ({ ...x, bundleSlots: num(e.target.value) }))} />
             </label>
-          ) : (
-            s.missions.map((m, mi) => (
-              <label key={m.id} className="k-inline">
-                {gameName(m.game)} slots <input aria-label={`Winner slots mission ${mi + 1}`} type="number" min={1} step={1} value={m.slots ?? ''} onChange={(e) => onMission(mi, { slots: num(e.target.value) })} />
-              </label>
-            ))
-          )}
+          ) : null}
           {s.missions.map((m, mi) => (
             <label key={`mb-${m.id}`} className="k-inline">
               {gameName(m.game)} min bet <input aria-label={`Minimum bet mission ${mi + 1}`} type="number" min={0} step="any" value={m.minBet ?? ''} onChange={(e) => onMission(mi, { minBet: num(e.target.value) })} /> {currency}
