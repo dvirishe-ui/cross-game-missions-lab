@@ -32,7 +32,7 @@ import { mulberry32 } from '../../math/rng';
 export const GAME_BY_ID: Record<string, SimGame> = Object.fromEntries(SIM_GAMES.map((g) => [g.id, g]));
 
 /** Games whose per-bet chance comes from a published paytable or rules. */
-export const EXACT_GAMES: GameId[] = ['plinko', 'mines', 'goal', 'keno'];
+export const EXACT_GAMES: GameId[] = ['plinko', 'mines', 'goal', 'keno', 'dice', 'hi-lo'];
 /**
  * Cash-out games with a constant 97% RTP: cashing out at X× must succeed
  * RTP ÷ X of the time (otherwise the return at X× would not be the RTP).

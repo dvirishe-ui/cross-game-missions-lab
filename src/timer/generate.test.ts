@@ -34,7 +34,7 @@ describe('market-aware suggestions', () => {
   it('keeps only games the calculator can time, in the country order', async () => {
     const { marketGames } = await import('./generate');
     const { GAME_RANKING } = await import('../data/gameRanking');
-    expect(marketGames(GAME_RANKING.Kenya)).toEqual(['aviator', 'plinko', 'trader', 'pilot-chicken', 'goal', 'keno', 'mines']);
+    expect(marketGames(GAME_RANKING.Kenya)).toEqual(['aviator', 'plinko', 'trader', 'pilot-chicken', 'goal', 'keno', 'hi-lo', 'mines', 'dice']);
     expect(Object.keys(GAME_RANKING)).toHaveLength(230);
   });
   it('favours the top games of the market across many days', async () => {

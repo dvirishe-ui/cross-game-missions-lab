@@ -18,6 +18,8 @@ import {
 // 'grid'      Mines, Goal: exact chances from the game's grid rules.
 // 'crash'     Aviator, Trader, Pilot Chicken: the player cashes out at X, which
 //             succeeds RTP / X of the time (Aviator's rounds are shared by everyone).
+// 'grid'      also Dice (payout = 97% ÷ win chance) and Hi-Lo (each guess priced
+//             to 97%, chained guesses multiply; exact from the rules).
 // 'unknown'   Keno 80: no paytable found, RTP / X is only a ceiling.
 
 export type GameKind = 'paytable' | 'grid' | 'crash' | 'unknown';
@@ -132,6 +134,36 @@ export const SIM_GAMES: SimGame[] = [
     sources: [{ label: 'SlotCatalog: Keno 80 (Spribe)', url: 'https://slotcatalog.com/en/slots/Keno-80-Spribe' }],
   },
   {
+    id: 'dice',
+    name: 'Dice',
+    kind: 'grid',
+    rtp: 0.97,
+    rtpNote: '97% (Spribe; one listing says 97.3%)',
+    maxMultiplier: 9900,
+    betsPerMin: 12,
+    shared: false,
+    how: 'Roll over or under a number from 0 to 100; the player sets the win chance and the payout is 97% ÷ win chance. So X× is hit on 97% ÷ X of bets, up to about 9,900×.',
+    sources: [
+      { label: 'Spribe: Dice', url: 'https://spribe.co/games/dice' },
+      { label: 'RTPwiki: Dice (Spribe)', url: 'https://www.rtpwiki.com/games/dice-rtp/' },
+    ],
+  },
+  {
+    id: 'hi-lo',
+    name: 'Hi-Lo',
+    kind: 'grid',
+    rtp: 0.97,
+    rtpNote: '97% (Spribe)',
+    maxMultiplier: 10_000,
+    betsPerMin: 6,
+    shared: false,
+    how: 'Guess whether the next card (Ace low to King high, endless deck) is higher-or-same or lower-or-same. Each guess pays 97% × 13 ÷ winning cards (1.05× to 12.61×); correct guesses chain and multiply, skipping a card is free. Above 12.61× a player needs several guesses in a row, each costing 3%.',
+    sources: [
+      { label: 'Spribe: Hi-Lo', url: 'https://spribe.co/games/hi-lo' },
+      { label: 'casinoslots.co.za: Hi Lo rules (every guess priced to 97%)', url: 'https://www.casinoslots.co.za/games/provably-fair/hilo/' },
+    ],
+  },
+  {
     id: 'trader',
     name: 'Trader',
     kind: 'crash',
@@ -241,12 +273,47 @@ function compute(g: SimGame, x: number, exact: boolean): Chance {
         }
       return best;
     }
+    case 'dice': {
+      // Payout = RTP ÷ win chance, win chance up to 98%: pick the chance that pays exactly X.
+      if (exact) return { p: g.rtp / x, setup: `Win chance ${((g.rtp / x) * 100).toFixed(2)}%`, pays: x };
+      const p = Math.min(0.98, g.rtp / x);
+      return { p, setup: `Win chance ${(p * 100).toFixed(2)}%`, pays: g.rtp / p };
+    }
+    case 'hi-lo': {
+      // One guess with k of 13 ranks winning pays 0.97 × 13 / k. Chains multiply.
+      // Best plan: fewest steps, each as safe as possible, whose product reaches X.
+      const best = hiLoBest(x, g.rtp, exact);
+      return best ?? NONE(g);
+    }
     default: {
       // Crash maths: cashing out at X succeeds RTP / X of the time.
       if (exact) return { p: 0, setup: 'Exact results not modelled', pays: 0 };
       return { p: Math.min(1, g.rtp / x), setup: g.shared ? `Cash out at ${fmtX(x)} (shared round)` : `Cash out at ${fmtX(x)}`, pays: x };
     }
   }
+}
+
+/** Best chain of Hi-Lo guesses (k winning ranks each) whose payout reaches x. */
+function hiLoBest(x: number, rtp: number, exact: boolean): Chance | null {
+  const mult = (k: number) => (rtp * 13) / k;
+  let best: { p: number; ks: number[]; pays: number } | null = null;
+  // steps of up to 6 guesses, ranks k chosen in non-increasing order (order does not matter)
+  const walk = (ks: number[], pays: number, p: number, maxK: number) => {
+    if (ks.length && (exact ? Math.abs(pays - x) / x < 0.005 : pays >= x - 1e-9)) {
+      if (!best || p > best.p) best = { p, ks: [...ks], pays };
+      return;
+    }
+    if (ks.length >= 6 || (best && p <= best.p)) return;
+    for (let k = maxK; k >= 1; k--) {
+      ks.push(k);
+      walk(ks, pays * mult(k), (p * k) / 13, k);
+      ks.pop();
+    }
+  };
+  walk([], 1, 1, 12);
+  if (!best) return null;
+  const b = best as { p: number; ks: number[]; pays: number };
+  return { p: b.p, setup: `${b.ks.length} guess${b.ks.length === 1 ? '' : 'es'} (${b.ks.map((k) => `${mult(k).toFixed(2)}×`).join(' → ')})`, pays: b.pays };
 }
 
 /** "1 in 31" style text. */

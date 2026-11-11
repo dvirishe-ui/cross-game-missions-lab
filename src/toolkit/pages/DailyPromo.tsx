@@ -61,7 +61,7 @@ import {
 } from '../daily/plan';
 import { dayDateOf, scheduleRows, validatePlan, type DIssue, type SessionRow } from '../daily/schedule';
 
-const PLAN_GAMES: GameId[] = ['aviator', 'plinko', 'mines', 'goal', 'keno', 'trader', 'pilot-chicken', 'keno-80'];
+const PLAN_GAMES: GameId[] = ['aviator', 'plinko', 'mines', 'goal', 'keno', 'trader', 'pilot-chicken', 'dice', 'hi-lo', 'keno-80'];
 const gameName = (g: GameId) => GAME_BY_ID[g]?.name ?? g;
 const pctOrDash = (x: number | null, d = 0) => (x == null ? '—' : `${(x * 100).toFixed(d)}%`);
 const kebab = (s: string) => s.toLowerCase().replace(/[^a-z]+/g, '-');

@@ -84,7 +84,7 @@ export function randomSet(seed: number, games: Record<string, SimGame>): SimMiss
 
 const ROUND_CLOCK: Partial<Record<GameId, AviatorClock>> = { trader: TRADER_CLOCK };
 const isRound = (id: GameId) => id === 'aviator' || id === 'trader';
-export const PLAN_GAMES: GameId[] = ['aviator', 'trader', 'plinko', 'mines', 'goal', 'keno', 'pilot-chicken'];
+export const PLAN_GAMES: GameId[] = ['aviator', 'trader', 'plinko', 'mines', 'goal', 'keno', 'pilot-chicken', 'dice', 'hi-lo'];
 
 /** Task kinds and multipliers that make sense for each game. */
 const MENU: Record<string, { catch: number[]; kinds: SimMission['kind'][] }> = {
@@ -95,6 +95,9 @@ const MENU: Record<string, { catch: number[]; kinds: SimMission['kind'][] }> = {
   goal: { catch: [3, 5], kinds: ['collect', 'bets', 'catch'] },
   keno: { catch: [5, 10], kinds: ['bets', 'catch', 'collect'] },
   'pilot-chicken': { catch: [10, 20, 30], kinds: ['catch', 'collect', 'bets'] },
+  dice: { catch: [5, 10, 20], kinds: ['catch', 'bets', 'collect'] },
+  // Up to 12.61× is one guess; higher needs a chain, so stay at one-guess targets.
+  'hi-lo': { catch: [3, 6, 12], kinds: ['catch', 'collect', 'bets'] },
 };
 
 /** A task of the given kind sized so one player on auto needs about `minutes`. */

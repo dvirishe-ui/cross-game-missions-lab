@@ -371,11 +371,11 @@ describe('Daily Promo: prizes follow peak hours', () => {
 describe('Daily Promo: popular games', () => {
   it('uses only popular games next to Aviator, more popular ones more often', async () => {
     const { popularGames } = await import('./plan');
-    expect(popularGames()).toEqual(['pilot-chicken', 'mines', 'keno', 'trader', 'goal']);
+    expect(popularGames()).toEqual(['pilot-chicken', 'mines', 'keno', 'trader', 'goal', 'hi-lo']);
     const p = defaultPlan();
     const games = p.days.flatMap((d) => d.sessions.map((s) => s.missions[1].game));
     const count = (g: string) => games.filter((x) => x === g).length;
-    expect(new Set(games)).toEqual(new Set(['pilot-chicken', 'mines', 'keno', 'trader', 'goal']));
+    expect(new Set(games)).toEqual(new Set(['pilot-chicken', 'mines', 'keno', 'trader', 'goal', 'hi-lo']));
     expect(count('pilot-chicken')).toBeGreaterThan(count('goal'));
     expect(count('mines')).toBeGreaterThan(count('goal'));
     // spread out: no game twice in a row
@@ -398,8 +398,23 @@ describe('Daily Promo: popular games', () => {
     old.template = { ...old.template, rotation: ['plinko', 'mines', 'goal', 'keno'] };
     old.days[0].sessions[0].start = '18:30';
     const n = normalizeDaily(old).plan;
-    expect(n.template.rotation).toEqual(['pilot-chicken', 'mines', 'keno', 'trader', 'goal']);
+    expect(n.template.rotation).toEqual(['pilot-chicken', 'mines', 'keno', 'trader', 'goal', 'hi-lo']);
     expect(n.days[0].sessions[0].start).toBe('18:30');
     expect(n.days[0].sessions[0].missions[0].game).toBe('aviator');
+  });
+});
+
+describe('Dice and Hi-Lo', () => {
+  it('Dice hits X× on 97% ÷ X of bets; Hi-Lo uses its card steps and chains', async () => {
+    const { SIM_GAMES, chanceAtLeast } = await import('../../sim/games');
+    const dice = SIM_GAMES.find((g) => g.id === 'dice')!;
+    const hilo = SIM_GAMES.find((g) => g.id === 'hi-lo')!;
+    expect(chanceAtLeast(dice, 10).p).toBeCloseTo(0.097, 9);
+    expect(chanceAtLeast(dice, 9901).p).toBe(0);
+    expect(chanceAtLeast(hilo, 12).p).toBeCloseTo(1 / 13, 9); // one guess on a King (12.61×)
+    expect(chanceAtLeast(hilo, 2).p).toBeCloseTo(6 / 13, 9); // 2.10× with 6 winning ranks
+    expect(chanceAtLeast(hilo, 20).p).toBeLessThan(0.97 / 20); // a chain loses 3% per guess
+    expect(individualChance({ game: 'dice', threshold: 5, catches: 3, countPer: 'round', chanceOverride: null }, 15)).toBeGreaterThan(0);
+    expect(searchFits('hi-lo', 15).length).toBeGreaterThan(0);
   });
 });
