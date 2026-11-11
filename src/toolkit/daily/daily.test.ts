@@ -296,3 +296,56 @@ describe('Daily Promo: estimator', () => {
     expect(searchFits('trader', 15)).toEqual([]);
   });
 });
+
+describe('Daily Promo: length, peak hours and prizes per length', () => {
+  it('a longer session gets harder missions, a shorter one easier', async () => {
+    const { resizeSession } = await import('./plan');
+    const { medianMinutes } = await import('./estimate');
+    const s = defaultPlan().days[0].sessions[0];
+    const time = (x: typeof s) => x.missions.map((m) => medianMinutes({ game: m.game, threshold: m.threshold, catches: m.catches, countPer: m.countPer, chanceOverride: null })!);
+    const t10 = time(resizeSession(s, 10));
+    const t20 = time(resizeSession(s, 20));
+    t10.forEach((x, i) => expect(t20[i]).toBeGreaterThan(x));
+    // changing the campaign length also re-sizes days edited by hand
+    let p = editDay(defaultPlan(), 0, (d) => ({ ...d, sessions: d.sessions.map((x) => ({ ...x, start: x.start })) }));
+    p = setTemplate(p, { durationMin: 20 }, 'UTC');
+    expect(p.days[0].sessions[0].durationMin).toBe(20);
+    expect(p.days[0].sessions[0].missions[0]).toEqual({ ...p.days[0].sessions[0].missions[0], ...resizeSession(defaultPlan().days[0].sessions[0], 20).missions[0], id: p.days[0].sessions[0].missions[0].id, slots: 10 });
+  });
+  it('more sessions start earlier, still at the busiest hours', () => {
+    const p8 = setTemplate(defaultPlan(), { sessionsPerDay: 8 }, 'UTC');
+    expect(p8.days[0].sessions.map((s) => s.start)).toEqual(['11:00', '12:00', '18:00', '19:00', '20:00', '21:00', '22:00', '23:00']);
+  });
+  it('suggests the busiest free times for a session', async () => {
+    const { freePeakStarts, peakRank } = await import('./plan');
+    const p = defaultPlan();
+    const d = { ...p.days[0], sessions: p.days[0].sessions.map((s, i) => (i === 0 ? { ...s, start: '04:00' } : s)) };
+    expect(freePeakStarts(p, 'UTC', d, 0)).toEqual(['20:00', '19:00', '18:00']);
+    expect(peakRank('22:00', 'UTC')).toBe(0);
+    expect(peakRank('23:00', 'UTC+1')).toBe(0);
+  });
+  it('amount per session length: 10 min = X, 20 min = Y, total is their sum', () => {
+    let p = { ...defaultPlan(), prizeMode: 'per-length' as const, lengthAmounts: { '10': 100, '15': 150, '20': 200 } };
+    p = { ...p, days: p.days.map((d) => ({ ...d, sessions: d.sessions.map((s, i) => ({ ...s, durationMin: i === 0 ? 10 : i === 1 ? 20 : 15 })) })) };
+    const a = allocate(p, 999, 'USD');
+    const sess = (si: number) => a.pools.filter((x) => x.day === 0 && x.session === si).reduce((s, x) => s + x.minor!, 0);
+    expect(sess(0)).toBe(10000);
+    expect(sess(1)).toBe(20000);
+    expect(sess(2)).toBe(15000);
+    expect(a.budgetMinor).toBe(7 * (100 + 200 + 150 + 150) * 100);
+    // missing an amount → shares only, never invented money
+    const b = allocate({ ...p, lengthAmounts: { '10': 100, '15': null, '20': 200 } }, null, 'USD');
+    expect(b.budgetMinor).toBeNull();
+  });
+  it('split a total by length: a 20-minute session gets twice a 10-minute one', () => {
+    const p = defaultPlan();
+    p.days = [{ ...p.days[0], sessions: [{ ...p.days[0].sessions[0], durationMin: 10 }, { ...p.days[0].sessions[1], durationMin: 20 }] }];
+    const a = allocate(p, 300, 'USD');
+    expect(a.sessionsMinor[0]).toEqual([10000, 20000]);
+  });
+  it('plans saved before by-length prizes move to it', () => {
+    const v1 = { ...defaultPlan(), version: 1, weights: { day: 'equal', session: 'equal', mission: 'equal' } };
+    expect(normalizeDaily(v1).plan.weights.session).toBe('length');
+    expect(normalizeDaily({ ...v1, version: 2 }).plan.weights.session).toBe('equal');
+  });
+});

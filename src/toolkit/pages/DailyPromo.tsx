@@ -2,7 +2,7 @@
 // Reads and writes the shared project (dates, time zone, budget, currency)
 // plus its versioned `daily` plan. Planning only: nothing is sent, bet or paid.
 
-import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Chip, DateField, Grid, NumberField, Section, SelectField, TextField, TimeField, useToolkit } from '../components/Fields';
 import type { GameId } from '../../data/games';
 import { DEFAULT_CLOCK, meanRoundSec } from '../../timer/clock';
@@ -23,7 +23,7 @@ import {
   type EstMission,
   type PopulationResult,
 } from '../daily/estimate';
-import { announcementDraft, exportCsv, exportJson, importJson, qualifyingText } from '../daily/io';
+import { announcementDraft, exportCsv, exportJson, importJson } from '../daily/io';
 import {
   BUSIEST_UTC_HOURS,
   DAILY_VERSION,
@@ -37,6 +37,10 @@ import {
   copyDay,
   defaultPlan,
   editDay,
+  freePeakStarts,
+  peakRank,
+  resizeSession,
+  sizedMission,
   newMission,
   placeAtBusiest,
   presetRow,
@@ -115,6 +119,12 @@ export function DailyPromo() {
   const money = (minor: number | null) => (minor == null ? '—' : fmtMoney(fromMinor(minor, currency), currency));
   const hasMoney = alloc.budgetMinor != null;
 
+  // With an amount per session length, the campaign total is their sum: keep the shared budget in step.
+  const perLengthTotal = plan.prizeMode === 'per-length' && alloc.budgetMinor != null ? fromMinor(alloc.budgetMinor, currency) : null;
+  useEffect(() => {
+    if (perLengthTotal != null && perLengthTotal !== budget) update((x) => ({ ...x, prizes: { ...x.prizes, totalPool: perLengthTotal } }));
+  }, [perLengthTotal]);
+
   if (tooNew)
     return (
       <div className="k-page">
@@ -131,6 +141,12 @@ export function DailyPromo() {
   const editMission = (si: number, mi: number, patch: Partial<DMission>) => editSession(si, (s) => ({ ...s, missions: s.missions.map((m, k) => (k === mi ? { ...m, ...patch } : m)) }));
 
   const dayRows = rows.filter((r) => r.dayIndex === di);
+  const sessionPrize = (si: number) => {
+    const pools = alloc.pools.filter((x) => x.day === di && x.session === si);
+    if (!pools.length) return null;
+    if (hasMoney) return money(pools.reduce((a, x) => a + (x.minor ?? 0), 0));
+    return pct(pools.reduce((a, x) => a + x.share, 0), 2);
+  };
   const dayIssues = issues.filter((i) => i.day === di);
 
   // ---------- exports ----------
@@ -161,9 +177,7 @@ export function DailyPromo() {
       <div className="k-page-head">
         <div>
           <h1>Daily Promo</h1>
-          <p className="k-muted">
-            Plan days, timed sessions (10–20 min), missions that fit them, winner slots, prize shares and announcement deadlines. Internal planning only: nothing here sends messages, places bets or pays anyone.
-          </p>
+          <p className="k-muted">Days, sessions, missions, prizes and announcement times. Planning only: nothing is sent.</p>
         </div>
       </div>
 
@@ -188,12 +202,12 @@ export function DailyPromo() {
         <div>
           <small>Missions</small>
           <b>{t.missions}</b>
-          <span className="k-muted">{t.formula}</span>
+          <span className="k-muted">{t.uniform ? t.formula.split(' = ')[0] : ''}</span>
         </div>
         <div>
           <small>Winner slots</small>
           <b>{t.slots}</b>
-          <span className="k-muted">{t.slotFormula}. Slots, not unique people.</span>
+          <span className="k-muted">slots, not people</span>
         </div>
         <div className={errors.length ? 'bad' : warnings.length ? 'warn' : 'ok'}>
           <small>Checks</small>
@@ -203,10 +217,13 @@ export function DailyPromo() {
       </div>
 
       {/* ---------- essentials ---------- */}
-      <Section title="Campaign" note="Start date, time zone, budget and currency are shared with every other tool">
+      <Section title="Campaign">
         <Grid cols={4}>
           <DateField id="dp-start" label="Start date" value={startDate} onChange={(v) => setSchedule({ startDate: v })} />
-          <TextField id="dp-tz" label="Time zone" value={tz} placeholder="UTC, UTC+1, Africa/Lagos" onChange={(v) => setSchedule({ timezone: v })} />
+          <TextField id="dp-tz" label="Time zone" value={tz} placeholder="UTC, UTC+1, Africa/Lagos" onChange={(v) => {
+              setSchedule({ timezone: v });
+              if (parseZone(v)) setPlan((pl) => placeAtBusiest(pl, v, pl.days.map((_, i) => i).filter((i) => !pl.days[i].edited)));
+            }} />
           <Field label="Campaign length">
             <span className="k-row">
               <Seg label="Campaign length" value={LENGTHS.includes(t.days) ? t.days : -1} options={[...LENGTHS.map((n) => ({ id: n, label: `${n}d` })), { id: -1, label: 'Custom' }]} onChange={(n) => (n > 0 ? setPlan((pl) => setLength(pl, n, tz)) : document.getElementById('dp-days')?.focus())} />
@@ -217,7 +234,7 @@ export function DailyPromo() {
             <Seg id="dp-mode" label="Reward structure" value={plan.rewardMode} options={[{ id: 'independent', label: 'Independent missions' }, { id: 'bundle', label: 'Bundle (shared pool)' }]} onChange={(rewardMode) => setPlan((pl) => ({ ...pl, rewardMode }))} />
           </Field>
           <NumberField id="dp-spd" label="Sessions per day" min={1} value={plan.template.sessionsPerDay} onChange={(v) => v && v >= 1 && setTpl({ sessionsPerDay: Math.min(24, Math.round(v)) })} />
-          <NumberField id="dp-mps" label="Missions per session" min={1} hint="At least 2, one of them Aviator" value={plan.template.missionsPerSession} onChange={(v) => v && v >= 1 && setTpl({ missionsPerSession: Math.min(10, Math.round(v)) })} />
+          <NumberField id="dp-mps" label="Missions per session" min={1} value={plan.template.missionsPerSession} onChange={(v) => v && v >= 1 && setTpl({ missionsPerSession: Math.min(10, Math.round(v)) })} />
           <Field label="Session length">
             <span className="k-row">
               <Seg label="Session length" value={DURATIONS.includes(plan.template.durationMin) ? plan.template.durationMin : -1} options={[...DURATIONS.map((n) => ({ id: n, label: `${n} min` }))]} onChange={(n) => setTpl({ durationMin: n })} />
@@ -226,16 +243,16 @@ export function DailyPromo() {
           {plan.rewardMode === 'independent' ? (
             <NumberField id="dp-slots" label="Winner slots per mission" min={1} value={plan.template.slotsPerMission} onChange={(v) => v && v >= 1 && setTpl({ slotsPerMission: Math.round(v) })} />
           ) : (
-            <NumberField id="dp-bslots" label="Shared slots per session" min={1} hint="Finish every mission to claim one" value={plan.template.bundleSlots} onChange={(v) => v && v >= 1 && setPlan((pl) => ({ ...pl, template: { ...pl.template, bundleSlots: Math.round(v) } }))} />
+            <NumberField id="dp-bslots" label="Shared slots per session" min={1} value={plan.template.bundleSlots} onChange={(v) => v && v >= 1 && setPlan((pl) => ({ ...pl, template: { ...pl.template, bundleSlots: Math.round(v) } }))} />
           )}
           <TimeField id="dp-op-start" label="Operating hours from" value={plan.opStart} onChange={(opStart) => setPlan((pl) => ({ ...pl, opStart }))} />
-          <TimeField id="dp-op-end" label="Operating hours to" hint="Earlier than “from” = runs past midnight" value={plan.opEnd} onChange={(opEnd) => setPlan((pl) => ({ ...pl, opEnd }))} />
-          <NumberField id="dp-lead" label="Announcement lead" min={MIN_LEAD} suffix="min" hint={`At least ${MIN_LEAD} min before every session`} value={plan.leadMin} onChange={(v) => v != null && setPlan((pl) => ({ ...pl, leadMin: Math.round(v) }))} />
+          <TimeField id="dp-op-end" label="Operating hours to" value={plan.opEnd} onChange={(opEnd) => setPlan((pl) => ({ ...pl, opEnd }))} />
+          <NumberField id="dp-lead" label="Announcement lead" min={MIN_LEAD} suffix="min" value={plan.leadMin} onChange={(v) => v != null && setPlan((pl) => ({ ...pl, leadMin: Math.round(v) }))} />
           <Field label="Announcements">
             <Seg id="dp-ann" label="Announcements" value={plan.announceMode} options={[{ id: 'per-session', label: 'One per session' }, { id: 'per-day', label: 'One per day' }]} onChange={(announceMode) => setPlan((pl) => ({ ...pl, announceMode }))} />
           </Field>
         </Grid>
-        <Field label="Rotating games (each session: Aviator + the next game in this list)">
+        <Field label="Games next to Aviator">
           <div className="k-checks">
             {PLAN_GAMES.filter((g) => g !== 'aviator').map((g) => (
               <label key={g}>
@@ -248,14 +265,13 @@ export function DailyPromo() {
                   }}
                 />
                 {gameName(g)}
-                {!EXACT_GAMES.includes(g) && <small className="k-muted"> (no chance model)</small>}
               </label>
             ))}
           </div>
         </Field>
         <div className="k-row">
           <button type="button" className="t-btn" onClick={() => setPlan((pl) => placeAtBusiest(pl, tz, plan.days.map((_, i) => i).filter((i) => !pl.days[i].edited)))}>
-            Place sessions at the busiest hours
+            Move sessions to peak hours
           </button>
           {confirmAll ? (
             <span className="k-confirm">
@@ -278,10 +294,7 @@ export function DailyPromo() {
             </button>
           )}
         </div>
-        <p className="k-small k-muted">
-          Changing these settings rebuilds the days you have not edited. {editedCount ? `${editedCount} day${editedCount === 1 ? '' : 's'} edited by hand keep their own sessions.` : ''} Session times come from the busiest UTC hours you supplied (22, 21, 23, 20, 19, 18 … UTC), converted to {zoneLabel}
-          {plan.opStart && plan.opEnd ? ` and kept inside ${plan.opStart}–${plan.opEnd}` : ''}.
-        </p>
+
       </Section>
 
       {/* ---------- compare ---------- */}
@@ -291,7 +304,6 @@ export function DailyPromo() {
       <section className="k-section" id="dp-days-section">
         <div className="k-section-head">
           <h3>Days and sessions</h3>
-          <span className="k-note">Session times are on each day’s own date, in {zoneLabel}</span>
         </div>
         <div className="dp-daytabs" role="tablist" aria-label="Day">
           {plan.days.map((d, i) => {
@@ -314,10 +326,7 @@ export function DailyPromo() {
                 Day {di + 1}
                 {dayDateOf(startDate, di) ? ` · ${fmtShort(dayDateOf(startDate, di))}` : ''}
               </b>
-              {day.edited ? <Chip tone="info">Edited by hand</Chip> : <Chip tone="muted">Follows the settings</Chip>}
-              <span className="k-muted k-small">
-                {day.sessions.length} sessions · {day.sessions.reduce((a, s) => a + s.missions.length, 0)} missions · {day.sessions.reduce((a, s) => a + sessionSlots(plan, s), 0)} slots
-              </span>
+              {day.edited && <Chip tone="info">Edited</Chip>}
               <span className="k-day-actions">
                 <button type="button" className="k-link" disabled={di >= plan.days.length - 1} onClick={() => setPlan((pl) => copyDay(pl, di, [di + 1]))}>
                   Duplicate to Day {di + 2}
@@ -326,7 +335,7 @@ export function DailyPromo() {
                   Copy to all days
                 </button>
                 <button type="button" className="k-link" onClick={() => setPlan((pl) => placeAtBusiest(pl, tz, [di]))}>
-                  Busiest hours
+                  Peak hours
                 </button>
                 <button type="button" className="k-link" onClick={() => setPlan((pl) => ({ ...pl, days: pl.days.map((d, i) => (i === di ? { ...templateDay(pl, i, tz), id: d.id } : d)) }))}>
                   Reset to settings
@@ -356,6 +365,9 @@ export function DailyPromo() {
                   zoneLabel={zoneLabel}
                   assumptions={assumptions}
                   issues={dayIssues.filter((x) => x.session === si)}
+                  peaks={freePeakStarts(plan, tz, day, si)}
+                  isPeak={(peakRank(s.start, tz) ?? 99) < Math.max(6, day.sessions.length)}
+                  prize={sessionPrize(si)}
                   onSession={(fn) => editSession(si, fn)}
                   onMission={(mi, patch) => editMission(si, mi, patch)}
                   onRemove={() => editThisDay((d) => ({ ...d, sessions: d.sessions.filter((_, j) => j !== si) }))}
@@ -382,35 +394,75 @@ export function DailyPromo() {
       <Feasibility plan={plan} day={day} di={di} setPlan={setPlan} assumptions={assumptions} />
 
       {/* ---------- prizes ---------- */}
-      <Section title="Prize allocation" id="dp-prizes" note={hasMoney ? `Budget mode: exact amounts in ${currency.toUpperCase()}` : 'Percent-only mode: no budget or currency yet, so no money is shown'}>
+      <Section title="Prizes" id="dp-prizes" note={hasMoney ? undefined : 'Shares only until amounts and a currency are set'}>
         <Grid cols={4}>
-          <NumberField id="dp-budget" label="Budget (optional)" min={0} value={budget} onChange={(totalPool) => update((x) => ({ ...x, prizes: { ...x.prizes, totalPool } }))} />
+          <Field label="How prizes are set">
+            <Seg
+              id="dp-prize-mode"
+              label="How prizes are set"
+              value={plan.prizeMode}
+              options={[
+                { id: 'per-length', label: 'Amount per session length' },
+                { id: 'budget', label: 'Split a total' },
+              ]}
+              onChange={(prizeMode) => setPlan((pl) => ({ ...pl, prizeMode }))}
+            />
+          </Field>
           <TextField id="dp-currency" label="Currency" placeholder="USD" value={currency} onChange={(c) => update((x) => ({ ...x, prizes: { ...x.prizes, currency: c.toUpperCase() } }))} />
           <Field label="Payout per slot">
             <Seg label="Payout per slot" value={plan.payout} options={[{ id: 'equal', label: 'Equal' }, { id: 'ranked', label: 'Ranked' }]} onChange={(payout) => setPlan((pl) => ({ ...pl, payout }))} />
           </Field>
           <span />
-          {(['day', 'session', 'mission'] as const).map((lvl) => (
-            <Field key={lvl} label={`Split between ${lvl === 'day' ? 'days' : lvl === 'session' ? 'sessions' : 'missions'}`}>
-              <Seg
-                label={`Split between ${lvl}s`}
-                value={plan.weights[lvl]}
-                options={[
-                  { id: 'equal', label: 'Equal' },
-                  { id: 'custom', label: 'Custom weights' },
-                ]}
-                onChange={(m) => setPlan((pl) => ({ ...pl, weights: { ...pl.weights, [lvl]: m } }))}
+          {plan.prizeMode === 'per-length' ? (
+            DURATIONS.map((n) => (
+              <NumberField
+                key={n}
+                id={`dp-amount-${n}`}
+                label={`${n}-minute session`}
+                min={0}
+                suffix={currency || undefined}
+                value={plan.lengthAmounts[String(n)] ?? null}
+                onChange={(v) => setPlan((pl) => ({ ...pl, lengthAmounts: { ...pl.lengthAmounts, [String(n)]: v } }))}
               />
-            </Field>
-          ))}
+            ))
+          ) : (
+            <>
+              <NumberField id="dp-budget" label="Total budget" min={0} value={budget} onChange={(totalPool) => update((x) => ({ ...x, prizes: { ...x.prizes, totalPool } }))} />
+              <Field label="Split between sessions">
+                <Seg
+                  label="Split between sessions"
+                  value={plan.weights.session}
+                  options={[
+                    { id: 'length', label: 'By length' },
+                    { id: 'equal', label: 'Equal' },
+                    { id: 'custom', label: 'Custom' },
+                  ]}
+                  onChange={(m) => setPlan((pl) => ({ ...pl, weights: { ...pl.weights, session: m } }))}
+                />
+              </Field>
+              {(['day', 'mission'] as const).map((lvl) => (
+                <Field key={lvl} label={`Split between ${lvl}s`}>
+                  <Seg
+                    label={`Split between ${lvl}s`}
+                    value={plan.weights[lvl]}
+                    options={[
+                      { id: 'equal', label: 'Equal' },
+                      { id: 'custom', label: 'Custom' },
+                    ]}
+                    onChange={(m) => setPlan((pl) => ({ ...pl, weights: { ...pl.weights, [lvl]: m } }))}
+                  />
+                </Field>
+              ))}
+              {plan.weights.session === 'length' &&
+                DURATIONS.map((n) => (
+                  <NumberField key={n} id={`dp-lw-${n}`} label={`${n} min weight`} min={0} value={plan.lengthWeights[String(n)] ?? n / 10} onChange={(v) => v != null && setPlan((pl) => ({ ...pl, lengthWeights: { ...pl.lengthWeights, [String(n)]: v } }))} />
+                ))}
+            </>
+          )}
         </Grid>
-        <p className="k-small k-muted">
-          {plan.rewardMode === 'independent' ? 'Mission pool = budget × day share × session share × mission share; equal prize = mission pool ÷ slots.' : 'Bundle: the session pool (budget × day share × session share) is shared by its slots; it is not paid per mission.'}{' '}
-          {plan.payout === 'ranked' ? 'Ranked: the 1st slot gets n parts, the last gets 1.' : ''} Custom weights are set on each day (above) and in each session and mission card.
-        </p>
         <div className="k-tl-summary">
           <div>
-            <small>Each {plan.rewardMode === 'bundle' ? 'session pool' : 'mission'} (equal split)</small>
+            <small>Each {plan.rewardMode === 'bundle' ? 'session pool' : 'mission'} (if all equal)</small>
             <b>{alloc.pools.length ? `1/${alloc.pools.length} = ${pct(1 / alloc.pools.length)}` : '—'}</b>
           </div>
           <div>
@@ -418,7 +470,7 @@ export function DailyPromo() {
             <b>{t.slots ? `1/${t.slots} = ${pct(1 / t.slots)}` : '—'}</b>
           </div>
           <div>
-            <small>Budget</small>
+            <small>{plan.prizeMode === 'per-length' ? 'Total (sum of sessions)' : 'Budget'}</small>
             <b>{hasMoney ? money(alloc.budgetMinor) : 'Not set'}</b>
           </div>
           <div>
@@ -526,7 +578,7 @@ export function DailyPromo() {
       </Section>
 
       {/* ---------- policies ---------- */}
-      <Section title="Rules to decide" id="dp-policies" note="Unresolved policies show as [MISSING] in the T&C">
+      <Section title="Rules to decide" id="dp-policies">
         <Grid cols={3}>
           {POLICIES.map((pol) => (
             <SelectField
@@ -592,7 +644,7 @@ export function DailyPromo() {
           />
           {msg && <span className="k-small" role="status">{msg}</span>}
         </div>
-        <p className="k-small k-muted">CSV: one row per mission with date, time zone, session times, announcement deadline, slots, pool shares and money (blank until a budget and currency are set). JSON keeps the whole plan and can be imported back; a damaged file is repaired where possible or rejected without touching the current plan.</p>
+
       </Section>
 
       <Assumptions plan={plan} setPlan={setPlan} tz={tz} />
@@ -607,7 +659,7 @@ function Compare({ plan, onUse }: { plan: DailyPlan; onUse: (spd: number, mps: n
   const lengths = LENGTHS.includes(t.days) ? LENGTHS : [...LENGTHS, t.days];
   const slots = plan.rewardMode === 'bundle' ? plan.template.bundleSlots : plan.template.slotsPerMission;
   return (
-    <Section title="Compare campaign shapes" id="dp-compare" collapsible open={false} note="Light 2×2, Standard 4×2, Frequent 8×2 over 3, 7, 14 days or your length">
+    <Section title="Compare campaign shapes" id="dp-compare" collapsible open={false} >
       <div className="k-tablewrap">
         <table className="k-table">
           <thead>
@@ -729,6 +781,9 @@ function SessionCard({
   zoneLabel,
   assumptions,
   issues,
+  peaks,
+  isPeak,
+  prize,
   onSession,
   onMission,
   onRemove,
@@ -741,12 +796,25 @@ function SessionCard({
   zoneLabel: string;
   assumptions: Assumptions;
   issues: DIssue[];
+  /** Busiest free start times for this session, best first. */
+  peaks: string[];
+  /** The current start is one of the busiest hours. */
+  isPeak: boolean;
+  /** Session prize: money or share. */
+  prize: string | null;
   onSession: (fn: (s: DSession) => DSession) => void;
   onMission: (mi: number, patch: Partial<DMission>) => void;
   onRemove: () => void;
 }) {
   const [fitsFor, setFitsFor] = useState<number | null>(null);
   const lead = row?.leadMin;
+  const better = peaks.filter((x) => x !== s.start);
+  const slotText =
+    plan.rewardMode === 'bundle'
+      ? `${s.bundleSlots ?? plan.template.bundleSlots} shared slots`
+      : new Set(s.missions.map((m) => m.slots)).size === 1
+        ? `${s.missions[0]?.slots ?? '?'} slots per mission`
+        : s.missions.map((m) => m.slots ?? '?').join(' / ') + ' slots';
   return (
     <div className={`k-day dp-session ${issues.some((i) => i.level === 'error') ? 'has-err' : ''}`} id={`dp-session-${si}`}>
       <div className="k-day-head">
@@ -754,29 +822,31 @@ function SessionCard({
         <span className="k-muted">
           {s.start || '--:--'}–{row?.end?.time ?? '--:--'} {zoneLabel}
         </span>
-        {row?.deadline && (
-          <Chip tone={lead != null && lead < MIN_LEAD ? 'bad' : 'muted'}>
-            Announce by {row.prevDate && row.deadline.date ? `${validDate(row.deadline.date) ? fmtShort(row.deadline.date) : row.deadline.date} ` : ''}
-            {row.deadline.time} ({lead} min lead)
-          </Chip>
-        )}
-        {row?.status === 'nonexistent' && <Chip tone="bad">time does not exist (DST)</Chip>}
-        {row?.status === 'ambiguous' && <Chip tone="warn">time happens twice (DST)</Chip>}
+        {prize && <span className="dp-prize" title="This session's share of the prize pool">{prize}</span>}
         <span className="k-day-actions">
-          <button type="button" className="k-link danger" onClick={onRemove}>
-            Remove session
+          <button type="button" className="k-link danger" aria-label={`Remove session ${si + 1}`} title="Remove session" onClick={onRemove}>
+            ✕
           </button>
         </span>
       </div>
-      <div className="k-day-grid">
+      <div className="dp-session-row">
         <TimeField id={`dp-s${si}-start`} label="Start" value={s.start} onChange={(start) => onSession((x) => ({ ...x, start }))} />
         <Field label="Length">
-          <Seg label="Length" value={s.durationMin} options={DURATIONS.map((n) => ({ id: n, label: `${n}` }))} onChange={(durationMin) => onSession((x) => ({ ...x, durationMin }))} />
+          <Seg label="Length" value={s.durationMin} options={DURATIONS.map((n) => ({ id: n, label: `${n}` }))} onChange={(durationMin) => onSession((x) => resizeSession(x, durationMin, plan.feasibility))} />
         </Field>
-        {plan.announceMode === 'per-session' && <NumberField id={`dp-s${si}-lead`} label="Lead override" min={MIN_LEAD} suffix="min" value={s.leadMin} onChange={(leadMin) => onSession((x) => ({ ...x, leadMin }))} />}
-        {plan.rewardMode === 'bundle' && <NumberField id={`dp-s${si}-bslots`} label="Shared slots" min={1} value={s.bundleSlots ?? plan.template.bundleSlots} onChange={(bundleSlots) => onSession((x) => ({ ...x, bundleSlots }))} />}
-        {plan.weights.session === 'custom' && <NumberField id={`dp-s${si}-weight`} label="Session weight" min={0} value={s.weight ?? 1} onChange={(weight) => onSession((x) => ({ ...x, weight }))} />}
       </div>
+      {(better.length > 0 && !isPeak) || !s.start ? (
+        <div className="dp-peaks">
+          <span>{s.start ? 'Busier times:' : 'Best free times:'}</span>
+          {better.map((t) => (
+            <button key={t} type="button" className="dp-peak" onClick={() => onSession((x) => ({ ...x, start: t }))}>
+              {t}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="dp-peaks ok">Peak hour</div>
+      )}
       <div className="dp-missions">
         {s.missions.map((m, mi) => {
           const est: EstMission = { game: m.game, threshold: m.kind === 'catch' ? m.threshold : 1, catches: m.catches, countPer: m.countPer, chanceOverride: m.chanceOverride };
@@ -786,37 +856,30 @@ function SessionCard({
           return (
             <div key={m.id} className="dp-mission">
               <div className="k-task">
-                <span className="k-task-n">{mi + 1}</span>
-                <select aria-label="Game" value={m.game} onChange={(e) => onMission(mi, { game: e.target.value as GameId, chanceOverride: null })}>
+                <select aria-label="Game" value={m.game} onChange={(e) => onMission(mi, { game: e.target.value as GameId, chanceOverride: null, ...(m.kind === 'catch' ? sizedMission(e.target.value as GameId, s.durationMin, plan.feasibility) : {}) })}>
                   {PLAN_GAMES.map((g) => (
                     <option key={g} value={g}>
                       {gameName(g)}
                     </option>
                   ))}
                 </select>
-                <select aria-label="Mission type" value={m.kind} onChange={(e) => onMission(mi, { kind: e.target.value as DMission['kind'] })}>
-                  <option value="catch">Catch a multiplier</option>
-                  <option value="bets">Place bets</option>
-                </select>
-                {m.kind === 'catch' && (
+                {m.kind === 'catch' ? (
                   <span className="k-inline">
+                    catch
                     <input aria-label="Multiplier" type="number" min={1} step="any" value={m.threshold ?? ''} onChange={(e) => onMission(mi, { threshold: num(e.target.value) })} />×
                   </span>
+                ) : (
+                  <span className="k-inline">place</span>
                 )}
                 <span className="k-inline">
                   <input aria-label={m.kind === 'catch' ? 'Required catches' : 'Bets'} type="number" min={1} step={1} value={m.catches ?? ''} onChange={(e) => onMission(mi, { catches: num(e.target.value) })} />
                   {m.kind === 'catch' ? 'times' : 'bets'}
                 </span>
-                {plan.rewardMode === 'independent' && (
-                  <span className="k-inline">
-                    <input aria-label="Winner slots" type="number" min={1} step={1} value={m.slots ?? ''} onChange={(e) => onMission(mi, { slots: num(e.target.value) })} />
-                    slots
-                  </span>
-                )}
+                {m.kind === 'catch' && <span className="k-per" title={ind == null ? 'No chance model for this game' : `${Math.round(ind * 100)}% of players who ${m.game === 'aviator' ? 'bet every round' : 'play at the assumed pace'} finish in ${s.durationMin} min`}>{ind == null ? 'n/a' : `${Math.round(ind * 100)}%`}</span>}
                 <span className="k-task-actions">
                   {m.kind === 'catch' && !noModel && (
-                    <button type="button" className="k-link" aria-expanded={fitsFor === mi} onClick={() => setFitsFor(fitsFor === mi ? null : mi)}>
-                      Find fits
+                    <button type="button" className="k-link" aria-expanded={fitsFor === mi} title="Suggest multiplier and catches for this length" onClick={() => setFitsFor(fitsFor === mi ? null : mi)}>
+                      Fits
                     </button>
                   )}
                   <button type="button" className="k-link danger" aria-label={`Remove mission ${mi + 1}`} onClick={() => onSession((x) => ({ ...x, missions: x.missions.filter((_, k) => k !== mi) }))}>
@@ -824,40 +887,16 @@ function SessionCard({
                   </button>
                 </span>
               </div>
-              <div className="dp-mission-more">
-                <span className="k-inline">
-                  Min bet <input aria-label="Minimum qualifying bet" type="number" min={0} step="any" value={m.minBet ?? ''} onChange={(e) => onMission(mi, { minBet: num(e.target.value) })} /> {currency || ''}
-                </span>
-                {m.game === 'aviator' && m.kind === 'catch' && (
-                  <select aria-label="How catches count" value={m.countPer} onChange={(e) => onMission(mi, { countPer: e.target.value as DMission['countPer'] })}>
-                    <option value="round">Counts once per round</option>
-                    <option value="bet">Each bet counts (2 per round)</option>
-                  </select>
-                )}
-                {noModel && (
+              {noModel && m.kind === 'catch' && (
+                <div className="dp-mission-more">
                   <span className="k-inline">
                     Chance per bet <input aria-label="Chance per bet" type="number" min={0} max={1} step="any" placeholder="0.05" value={m.chanceOverride ?? ''} onChange={(e) => onMission(mi, { chanceOverride: num(e.target.value) })} />
                   </span>
-                )}
-                {plan.weights.mission === 'custom' && plan.rewardMode === 'independent' && (
-                  <span className="k-inline">
-                    Weight <input aria-label="Mission weight" type="number" min={0} step="any" value={m.weight ?? 1} onChange={(e) => onMission(mi, { weight: num(e.target.value) })} />
-                  </span>
-                )}
-                <span className="k-per">
-                  {m.kind !== 'catch'
-                    ? ''
-                    : ind == null
-                      ? noModel
-                        ? 'Insufficient data: no verified chance model for this game'
-                        : 'Insufficient data'
-                      : `${Math.round(ind * 100)}% of players who ${m.game === 'aviator' ? (plan.audience.roundShare < 1 ? `bet in ${Math.round(plan.audience.roundShare * 100)}% of rounds` : 'bet every round') : 'play at the assumed pace'} finish in ${s.durationMin} min`}
-                </span>
-              </div>
-              <p className="dp-qual">{qualifyingText(m, currency)}</p>
+                </div>
+              )}
               {fits && (
                 <ul className="dp-fits">
-                  {fits.length === 0 && <li className="k-muted">No combination fits the feasibility band for {s.durationMin} min. Widen the band under Assumptions.</li>}
+                  {fits.length === 0 && <li className="k-muted">Nothing fits {s.durationMin} min with the current settings.</li>}
                   {fits.map((f) => (
                     <li key={`${f.threshold}-${f.catches}`}>
                       <b>
@@ -878,14 +917,79 @@ function SessionCard({
           + Add mission
         </button>
       </div>
-      {issues.length > 0 && (
-        <ul className="k-issues">
-          {issues.map((i, k) => (
-            <li key={k} className={i.level}>
-              <span className="k-icon">{i.level === 'error' ? '!' : i.level === 'warning' ? '?' : 'i'}</span>
-              <span>{i.msg}</span>
-            </li>
+      <details className="dp-more">
+        <summary>
+          {slotText}
+          {row?.deadline && (
+            <span className={lead != null && lead < MIN_LEAD ? 'bad' : ''}>
+              {' '}
+              · announce by {row.prevDate && row.deadline.date ? `${validDate(row.deadline.date) ? fmtShort(row.deadline.date) : row.deadline.date} ` : ''}
+              {row.deadline.time}
+            </span>
+          )}
+          {row?.status === 'nonexistent' && <span className="bad"> · time does not exist (DST)</span>}
+          {row?.status === 'ambiguous' && <span className="bad"> · time happens twice (DST)</span>}
+        </summary>
+        <div className="dp-more-body">
+          {plan.rewardMode === 'bundle' ? (
+            <label className="k-inline">
+              Shared slots <input type="number" min={1} value={s.bundleSlots ?? plan.template.bundleSlots} onChange={(e) => onSession((x) => ({ ...x, bundleSlots: num(e.target.value) }))} />
+            </label>
+          ) : (
+            s.missions.map((m, mi) => (
+              <label key={m.id} className="k-inline">
+                {gameName(m.game)} slots <input aria-label={`Winner slots mission ${mi + 1}`} type="number" min={1} step={1} value={m.slots ?? ''} onChange={(e) => onMission(mi, { slots: num(e.target.value) })} />
+              </label>
+            ))
+          )}
+          {s.missions.map((m, mi) => (
+            <label key={`mb-${m.id}`} className="k-inline">
+              {gameName(m.game)} min bet <input aria-label={`Minimum bet mission ${mi + 1}`} type="number" min={0} step="any" value={m.minBet ?? ''} onChange={(e) => onMission(mi, { minBet: num(e.target.value) })} /> {currency}
+            </label>
           ))}
+          {s.missions.map((m, mi) =>
+            m.game === 'aviator' && m.kind === 'catch' ? (
+              <select key={`cp-${m.id}`} aria-label="How catches count" value={m.countPer} onChange={(e) => onMission(mi, { countPer: e.target.value as DMission['countPer'] })}>
+                <option value="round">Aviator: once per round</option>
+                <option value="bet">Aviator: each bet counts</option>
+              </select>
+            ) : null,
+          )}
+          {s.missions.map((m, mi) => (
+            <select key={`k-${m.id}`} aria-label={`Mission ${mi + 1} type`} value={m.kind} onChange={(e) => onMission(mi, { kind: e.target.value as DMission['kind'] })}>
+              <option value="catch">{gameName(m.game)}: catch a multiplier</option>
+              <option value="bets">{gameName(m.game)}: place bets</option>
+            </select>
+          ))}
+          {plan.announceMode === 'per-session' && (
+            <label className="k-inline">
+              Lead <input aria-label="Lead override" type="number" min={MIN_LEAD} placeholder={String(plan.leadMin)} value={s.leadMin ?? ''} onChange={(e) => onSession((x) => ({ ...x, leadMin: num(e.target.value) }))} /> min
+            </label>
+          )}
+          {plan.weights.session === 'custom' && (
+            <label className="k-inline">
+              Session weight <input type="number" min={0} step="any" value={s.weight ?? 1} onChange={(e) => onSession((x) => ({ ...x, weight: num(e.target.value) }))} />
+            </label>
+          )}
+          {plan.weights.mission === 'custom' &&
+            plan.rewardMode === 'independent' &&
+            s.missions.map((m, mi) => (
+              <label key={`w-${m.id}`} className="k-inline">
+                {gameName(m.game)} weight <input type="number" min={0} step="any" value={m.weight ?? 1} onChange={(e) => onMission(mi, { weight: num(e.target.value) })} />
+              </label>
+            ))}
+        </div>
+      </details>
+      {issues.filter((i) => i.level !== 'info').length > 0 && (
+        <ul className="k-issues">
+          {issues
+            .filter((i) => i.level !== 'info')
+            .map((i, k) => (
+              <li key={k} className={i.level}>
+                <span className="k-icon">{i.level === 'error' ? '!' : '?'}</span>
+                <span>{i.msg.replace(/^Day \d+, session \d+(, mission \d+ \([^)]*\))?: /, '')}</span>
+              </li>
+            ))}
         </ul>
       )}
     </div>
@@ -929,7 +1033,7 @@ function Feasibility({ plan, day, di, setPlan, assumptions }: { plan: DailyPlan;
   };
   const setAud = (patch: Partial<DailyPlan['audience']>) => setPlan((pl) => ({ ...pl, audience: { ...pl.audience, ...patch } }));
   return (
-    <Section title={`Feasibility · Day ${di + 1}`} id="dp-feasibility" note="Each output is shown separately; population outputs need your audience numbers">
+    <Section title={`Feasibility · Day ${di + 1}`} id="dp-feasibility" >
       <Grid cols={4}>
         <NumberField id="dp-aud" label="Active players per session" hint="User input" min={0} value={aud.activePlayers} onChange={(activePlayers) => setAud({ activePlayers })} />
         <NumberField id="dp-attempt" label="Share who attempt a mission" hint="User input" min={0} suffix="%" value={aud.attemptShare} onChange={(attemptShare) => setAud({ attemptShare })} />
@@ -974,9 +1078,7 @@ function Feasibility({ plan, day, di, setPlan, assumptions }: { plan: DailyPlan;
           </tbody>
         </table>
       </div>
-      <p className="k-small k-muted">
-        Individual chance assumes a player who {aud.roundShare < 1 ? `bets in ${Math.round(aud.roundShare * 100)}% of Aviator rounds` : 'bets in every Aviator round'} and plays the other games at the assumed pace for the whole window{plan.rewardMode === 'bundle' ? `, one game after another with ${aud.switchMin} min lost per switch` : ''}. Aviator players share every round, so either many finish together or few do: “All slots fill” is worked out over shared round sequences, not as independent coin flips. Time to fill is the typical session where the slots fill; unfilled slots are averaged over all simulated sessions. {plan.closeMode === 'when-filled' ? 'Missions close when full.' : 'Play continues to the scheduled end; completions after the slots fill win nothing.'} Heuristic labels use: under 50% chance of filling = “left over”, filling in the first 30% of the window = “very early”.
-      </p>
+      <p className="k-small k-muted">Aviator players share every round, so fill chances come from shared rounds, not independent players. Method and assumptions are listed at the bottom.</p>
     </Section>
   );
 }
@@ -1044,7 +1146,7 @@ function Announcements({ plan, rows, di, currency, zoneLabel }: { plan: DailyPla
   const [copied, setCopied] = useState<string | null>(null);
   const groups = plan.announceMode === 'per-day' ? [rows] : rows.map((r) => [r]);
   return (
-    <Section title={`Announcement drafts · Day ${di + 1}`} id="dp-announce" collapsible open={false} note="Copyable drafts only: nothing is sent or scheduled">
+    <Section title={`Announcement drafts · Day ${di + 1}`} id="dp-announce" collapsible open={false} note="Drafts to copy">
       {groups.map((g, k) => {
         const text = announcementDraft(p, plan, g, currency);
         const dl = g[0]?.deadline;
@@ -1090,7 +1192,7 @@ function Assumptions({ plan, setPlan, tz }: { plan: DailyPlan; setPlan: (fn: (pl
     { what: 'SPRIBE Adventure (5-hour days)', value: '—', kind: 'Not used', note: 'Multi-hour days are not validation for 10–20 minute sessions, so they are not used here.' },
   ];
   return (
-    <Section title="Assumptions and data sources" id="dp-assumptions" collapsible open={false} note="Every input labelled: observed data, model assumption, user input or heuristic">
+    <Section title="Assumptions and data sources" id="dp-assumptions" collapsible open={false} >
       <div className="k-tablewrap">
         <table className="k-table dp-assume">
           <thead>

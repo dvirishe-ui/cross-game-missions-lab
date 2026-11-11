@@ -6,12 +6,15 @@
 import type { GameId } from '../../data/games';
 import { DEFAULT_FEASIBILITY, EXACT_GAMES, searchFits, type Feasibility } from './estimate';
 
-export const DAILY_VERSION = 1;
+/** v2: sessions can be weighted by length (v1 plans move from equal to by-length). */
+export const DAILY_VERSION = 2;
 
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 
 export type RewardMode = 'independent' | 'bundle';
 export type WeightMode = 'equal' | 'custom';
+/** Sessions can also be weighted by their length (a 20-minute session pays more than a 10-minute one). */
+export type SessionWeightMode = WeightMode | 'length';
 export type PolicyKey = 'repeatWinners' | 'unfilledSlots' | 'unawardedFunds' | 'ties' | 'selection';
 
 export interface DMission {
@@ -78,7 +81,12 @@ export interface DailyPlan {
   /** Operating hours, local 'HH:MM'. End before start = runs past midnight. */
   opStart: string;
   opEnd: string;
-  weights: { day: WeightMode; session: WeightMode; mission: WeightMode };
+  weights: { day: WeightMode; session: SessionWeightMode; mission: WeightMode };
+  /** Weight per session length in minutes, used when sessions are weighted by length. */
+  lengthWeights: Record<string, number>;
+  /** 'budget': split a total. 'per-length': a set amount per session by its length (10 min = X, 20 min = Y). */
+  prizeMode: 'budget' | 'per-length';
+  lengthAmounts: Record<string, number | null>;
   payout: 'equal' | 'ranked';
   audience: { activePlayers: number | null; attemptShare: number | null; roundShare: number; switchMin: number; betsPerMin: Partial<Record<GameId, number>> };
   feasibility: Feasibility;
@@ -89,6 +97,9 @@ export interface DailyPlan {
 
 export const MIN_LEAD = 40;
 export const DURATIONS = [10, 15, 20];
+/** Default: pool share in proportion to minutes (10 → 1, 15 → 1.5, 20 → 2). */
+export const DEFAULT_LENGTH_WEIGHTS: Record<string, number> = { '10': 1, '15': 1.5, '20': 2 };
+export const lengthWeight = (plan: Pick<DailyPlan, 'lengthWeights'>, minutes: number) => plan.lengthWeights[String(minutes)] ?? minutes / 10;
 
 /** User-supplied: UTC hours ranked by player activity, busiest first (observed data). */
 export const BUSIEST_UTC_HOURS = [22, 21, 23, 20, 19, 18, 12, 11, 13, 16, 10, 14, 17, 15, 9, 7, 8, 0, 6, 1, 5, 2, 4, 3];
@@ -113,7 +124,10 @@ export function defaultPlan(): DailyPlan {
     announceMode: 'per-session',
     opStart: '',
     opEnd: '',
-    weights: { day: 'equal', session: 'equal', mission: 'equal' },
+    weights: { day: 'equal', session: 'length', mission: 'equal' },
+    lengthWeights: { ...DEFAULT_LENGTH_WEIGHTS },
+    prizeMode: 'budget',
+    lengthAmounts: { '10': null, '15': null, '20': null },
     payout: 'equal',
     audience: { activePlayers: null, attemptShare: null, roundShare: 1, switchMin: 1, betsPerMin: {} },
     feasibility: { ...DEFAULT_FEASIBILITY },
@@ -155,6 +169,15 @@ export function templateSession(plan: Pick<DailyPlan, 'template' | 'feasibility'
   return { id: uid(), start, durationMin: t.durationMin, missions, leadMin: null, bundleSlots: null, weight: null };
 }
 
+/** Re-sizes a session's catch missions for a new length: shorter = easier, longer = harder. */
+export function resizeSession(s: DSession, durationMin: number, f?: Feasibility): DSession {
+  return {
+    ...s,
+    durationMin,
+    missions: s.missions.map((m) => (m.kind === 'catch' && m.chanceOverride == null ? { ...m, ...sizedMission(m.game, durationMin, f) } : m)),
+  };
+}
+
 export function templateDay(plan: DailyPlan, dayIndex: number, tz: string): DDay {
   const starts = suggestStarts(plan, tz);
   const n = plan.template.sessionsPerDay;
@@ -182,7 +205,10 @@ export function setLength(plan: DailyPlan, days: number, tz: string): DailyPlan 
 }
 
 export function setTemplate(plan: DailyPlan, patch: Partial<DailyPlan['template']>, tz: string): DailyPlan {
-  return applyTemplate({ ...plan, template: { ...plan.template, ...patch } }, tz);
+  const next = applyTemplate({ ...plan, template: { ...plan.template, ...patch } }, tz);
+  if (patch.durationMin == null || patch.durationMin === plan.template.durationMin) return next;
+  // A new session length also applies to days edited by hand: their games and times stay, missions re-size.
+  return { ...next, days: next.days.map((d) => (d.edited ? { ...d, sessions: d.sessions.map((s) => resizeSession(s, patch.durationMin!, next.feasibility)) } : d)) };
 }
 
 /** Copies one day onto others (marks them edited so the template leaves them alone). */
@@ -270,6 +296,35 @@ export function suggestStarts(plan: Pick<DailyPlan, 'template' | 'opStart' | 'op
   }
   // A start is a time on the day's own date, so plain clock order is real order.
   return chosen.sort((x, y) => x - y).map(hm);
+}
+
+/** Busiest start times still free on a day (not clashing with its other sessions), best first. */
+export function freePeakStarts(plan: Pick<DailyPlan, 'template' | 'opStart' | 'opEnd'>, tz: string, day: DDay, except: number, limit = 3): string[] {
+  const off = zoneOffsetMin(tz) ?? 0;
+  const others = day.sessions.filter((_, i) => i !== except).flatMap((s) => (minOf(s.start) == null ? [] : [{ a: minOf(s.start)!, d: s.durationMin }]));
+  const dur = day.sessions[except]?.durationMin ?? plan.template.durationMin;
+  const gap = plan.template.gapMin;
+  const out: string[] = [];
+  for (const step of [0, 30]) {
+    for (const h of BUSIEST_UTC_HOURS) {
+      if (out.length >= limit) return out;
+      const local = (((h * 60 + step + off) % 1440) + 1440) % 1440;
+      if (!insideHours(local, dur, plan.opStart, plan.opEnd)) continue;
+      if (others.some((o) => local < o.a + o.d + gap && o.a < local + dur + gap)) continue;
+      if (!out.includes(hm(local))) out.push(hm(local));
+    }
+  }
+  return out;
+}
+
+/** Rank of a local start time in the busiest-hours list (0 = busiest), or null. */
+export function peakRank(start: string, tz: string): number | null {
+  const m = minOf(start);
+  if (m == null) return null;
+  const off = zoneOffsetMin(tz) ?? 0;
+  const utcHour = Math.floor((((m - off) % 1440) + 1440) % 1440 / 60);
+  const i = BUSIEST_UTC_HOURS.indexOf(utcHour);
+  return i < 0 ? null : i;
 }
 
 export function placeAtBusiest(plan: DailyPlan, tz: string, days: number[] | 'all'): DailyPlan {
@@ -446,7 +501,10 @@ export function normalizeDaily(raw: unknown): NormalizeResult {
     announceMode: r.announceMode === 'per-day' ? 'per-day' : 'per-session',
     opStart: str(r.opStart),
     opEnd: str(r.opEnd),
-    weights: { day: wm(w.day), session: wm(w.session), mission: wm(w.mission) },
+    weights: { day: wm(w.day), session: w.session === 'custom' ? 'custom' : w.session === 'equal' && version >= 2 ? 'equal' : 'length', mission: wm(w.mission) },
+    prizeMode: r.prizeMode === 'per-length' ? 'per-length' : 'budget',
+    lengthAmounts: { '10': null, '15': null, '20': null, ...(typeof r.lengthAmounts === 'object' && r.lengthAmounts ? Object.fromEntries(Object.entries(r.lengthAmounts as Record<string, unknown>).map(([k, v]) => [k, numOrNull(v)])) : {}) },
+    lengthWeights: typeof r.lengthWeights === 'object' && r.lengthWeights ? { ...DEFAULT_LENGTH_WEIGHTS, ...(r.lengthWeights as Record<string, number>) } : { ...DEFAULT_LENGTH_WEIGHTS },
     payout: r.payout === 'ranked' ? 'ranked' : 'equal',
     audience: {
       activePlayers: numOrNull(a.activePlayers),
