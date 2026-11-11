@@ -1,0 +1,50 @@
+/* Apple-style pass, merged from the live artifact (applied there by another session).
+   Loaded after toolkit.css so it overrides the base tokens. */
+:root{--bg:#f5f5f7;--surface:#ffffff;--surface-2:#f0f0f3;--line:rgba(0,0,0,.08);--fg:#1d1d1f;--fg-2:#424245;--muted:#6e6e73;--accent:oklch(.6 .2 42);--accent-soft:color-mix(in oklch,oklch(.6 .2 42) 12%,transparent);--model:#0071e3;--model-soft:rgba(0,113,227,.11);--ok:#248a3d;--ok-soft:rgba(36,138,61,.11);--warn:#b25000;--warn-soft:rgba(255,149,0,.14);--bad:#d70015;--bad-soft:rgba(215,0,21,.09);--font-display:-apple-system,BlinkMacSystemFont,"SF Pro Display","Inter","Segoe UI",system-ui,sans-serif;--font-body:-apple-system,BlinkMacSystemFont,"SF Pro Text","Inter","Segoe UI",system-ui,sans-serif;--font-mono:ui-monospace,"SF Mono","IBM Plex Mono",Menlo,monospace;--radius:18px;--seg-track:rgba(118,118,128,.12);--seg-thumb:#ffffff;--card-shadow:0 1px 2px rgba(0,0,0,.04),0 8px 24px -14px rgba(0,0,0,.18);--ease-ios:cubic-bezier(.32,.72,0,1);--ease-soft:cubic-bezier(.25,.1,.25,1);--on-accent:#fff}
+@media(prefers-color-scheme:dark){:root:not([data-theme=light]){--bg:#0e0e0f;--surface:#1c1c1e;--surface-2:#2a2a2d;--line:rgba(255,255,255,.09);--fg:#f5f5f7;--fg-2:#d1d1d6;--muted:#98989d;--accent:oklch(.74 .19 45);--accent-soft:color-mix(in oklch,oklch(.74 .19 45) 16%,transparent);--model:#0a84ff;--model-soft:rgba(10,132,255,.18);--ok:#30d158;--ok-soft:rgba(48,209,88,.15);--warn:#ff9f0a;--warn-soft:rgba(255,159,10,.16);--bad:#ff453a;--bad-soft:rgba(255,69,58,.16);--seg-track:rgba(118,118,128,.24);--seg-thumb:#636366;--on-accent:oklch(.16 .03 40);--card-shadow:0 1px 0 rgba(255,255,255,.04) inset,0 8px 24px -12px rgba(0,0,0,.6)}}
+:root[data-theme=dark]{--bg:#0e0e0f;--surface:#1c1c1e;--surface-2:#2a2a2d;--line:rgba(255,255,255,.09);--fg:#f5f5f7;--fg-2:#d1d1d6;--muted:#98989d;--accent:oklch(.74 .19 45);--accent-soft:color-mix(in oklch,oklch(.74 .19 45) 16%,transparent);--model:#0a84ff;--model-soft:rgba(10,132,255,.18);--ok:#30d158;--ok-soft:rgba(48,209,88,.15);--warn:#ff9f0a;--warn-soft:rgba(255,159,10,.16);--bad:#ff453a;--bad-soft:rgba(255,69,58,.16);--seg-track:rgba(118,118,128,.24);--seg-thumb:#636366;--on-accent:oklch(.16 .03 40);--card-shadow:0 1px 0 rgba(255,255,255,.04) inset,0 8px 24px -12px rgba(0,0,0,.6)}
+body{font-optical-sizing:auto;-moz-osx-font-smoothing:grayscale;text-rendering:optimizeLegibility;background-image:radial-gradient(1200px 520px at 50% -220px,var(--accent-soft),transparent 72%);background-repeat:no-repeat}
+::selection{background:color-mix(in oklch,var(--accent) 30%,transparent)}
+*{scrollbar-width:thin;scrollbar-color:color-mix(in srgb,var(--muted) 35%,transparent) transparent}
+:focus-visible{outline-color:var(--accent);border-radius:10px}
+h1,h2,h3{font-weight:700;letter-spacing:-.012em;line-height:1.2}
+h2{letter-spacing:-.022em}
+.t-calc-head h1,.k-page-head h1{font-weight:700;letter-spacing:-.03em;line-height:1.08}
+p{text-wrap:pretty}
+.t-eyebrow{font-family:var(--font-body);font-weight:600;letter-spacing:.06em}
+/* Frosted header and capsule tabs */
+.t-top{background:color-mix(in srgb,var(--bg) 72%,transparent);-webkit-backdrop-filter:saturate(180%) blur(20px);backdrop-filter:saturate(180%) blur(20px)}
+.t-brand{font-weight:700;letter-spacing:-.02em}
+.k-tabs a,.t-nav a{border-radius:999px;padding:7px 14px;transition:color .18s var(--ease-soft),background-color .18s var(--ease-soft)}
+.k-tabs a[aria-current=page]{background:color-mix(in srgb,var(--fg) 8%,transparent);box-shadow:none}
+/* Controls: capsules with instant press feedback */
+button{border-radius:999px;padding:7px 14px;transition:color .18s var(--ease-soft),background-color .18s var(--ease-soft),border-color .18s var(--ease-soft),box-shadow .18s var(--ease-soft),scale .18s var(--ease-soft)}
+button:active:not(:disabled){scale:.97;transition-duration:70ms}
+button:hover{border-color:color-mix(in srgb,var(--fg) 22%,transparent)}
+.t-btn.primary{background:var(--accent);border-color:transparent;color:var(--on-accent);box-shadow:inset 0 1px 0 rgba(255,255,255,.25)}
+.t-btn.primary:hover{filter:brightness(1.08);border-color:transparent}
+.t-days button,.t-plan [role=tab],.k-styles button{border-radius:14px}
+.k-link{border-radius:6px}
+.k-link:active:not(:disabled){scale:1}
+input,select,textarea{border-radius:10px;padding:7px 10px;transition:border-color .18s var(--ease-soft),box-shadow .18s var(--ease-soft)}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+/* Segmented controls (Apple): translucent track, raised thumb */
+.t-seg,.k-seg,.k-subtabs,.t-theme{display:inline-flex;align-self:flex-start;width:fit-content;gap:2px;background:var(--seg-track);border:0;border-radius:999px;padding:2px}
+.t-seg button,.k-seg button,.k-subtabs button,.t-theme button,.t-seg button:first-child,.t-seg button:last-child,.k-seg button:first-child,.k-seg button:last-child{border:0;border-radius:999px;background:transparent;color:var(--muted)}
+.t-seg button[aria-pressed=true],.k-seg button[aria-pressed=true],.k-subtabs button[aria-selected=true],.t-theme button[aria-pressed=true]{background:var(--seg-thumb);color:var(--fg);font-weight:600;box-shadow:0 1px 3px rgba(0,0,0,.2),0 0 0 .5px rgba(0,0,0,.06)}
+/* Cards: rounder, hairline edges, soft depth */
+.t-card,.k-section,.t-verdict,.t-tile,.k-side,.t-length,.t-how,.t-before{border-radius:var(--radius);box-shadow:var(--card-shadow)}
+.t-verdict{border-top-width:1px;box-shadow:inset 0 4px 0 var(--tone),var(--card-shadow)}
+.t-daycard,.k-day,.k-tl-summary>div,.t-task,.k-task,.k-issues li,.k-tl li,.k-moneycheck,.k-status,.t-suggest,.t-saveday,.k-generate,.k-doc,.k-missing-bar{border-radius:14px}
+.t-track,.t-track .fill,.t-track .range{border-radius:999px}
+/* Numbers: SF tabular figures instead of a typewriter face */
+.t-big,.t-facts dd,.t-tile b,.t-one-result b,.k-stats dd,.k-tl-summary b{font-family:var(--font-display);font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+@media(prefers-reduced-motion:reduce){button:active:not(:disabled){scale:1}}
+@media(prefers-reduced-transparency:reduce){.t-top{background:var(--bg);-webkit-backdrop-filter:none;backdrop-filter:none}}
+@media(prefers-contrast:more){:root{--line:rgba(0,0,0,.35)}:root[data-theme=dark]{--line:rgba(255,255,255,.3)}}
+
+/* Daily Promo in the same style */
+.dp-summary>div,.dp-daytabs button,.dp-fits{border-radius:14px}
+.dp-summary>div{box-shadow:var(--card-shadow)}
+.dp-summary b{font-family:var(--font-display);letter-spacing:-.02em}
+.dp-timeline{border-radius:12px}

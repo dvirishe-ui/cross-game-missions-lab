@@ -1,7 +1,7 @@
 // Every form field that a check or a [MISSING: …] marker can point at.
 // The id is the input's DOM id; the tab is the page that holds it.
 
-export type Tab = 'calculator' | 'checker' | 'timeline' | 'tc';
+export type Tab = 'calculator' | 'checker' | 'daily' | 'timeline' | 'tc';
 
 export interface FieldRef {
   tab: Tab;

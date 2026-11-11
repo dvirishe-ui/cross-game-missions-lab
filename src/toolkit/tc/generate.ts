@@ -3,6 +3,7 @@
 // show which words are template wording, which are campaign values and which
 // are missing. Nothing missing is ever filled with a guess.
 
+import { dailyTcLines } from '../daily/io';
 import { allowedGames, calculatedTotal, dayDate, dayEnd, dayPool, dayStart, dayWinners, GAME_NAME, listText, taskText, usedGames } from '../model/campaign';
 import { FIELDS, dayField, slotField, type FieldRef } from '../model/fields';
 import { fmtMoney, validCurrency } from '../model/money';
@@ -123,6 +124,9 @@ export function tcBlocks(p: Project, t: MasterTemplate): Block[] {
   if (p.eligibility.verifiedOnly) add('verification', wording('verification'));
   if (p.payout.currencyRule) add('payoutCurrency', wording('payoutCurrency'));
   if (!p.clauses.combinable) add('otherOffers', wording('otherOffers'));
+  if (p.daily && p.daily.useInTc)
+    for (const l of dailyTcLines(p, p.daily))
+      out.push({ kind: 'bullet', clause: 'dailyPromo', segs: l.missing ? splitMissing(l.text, l.missing) : [text(l.text)] });
   add('cheating', wording('cheating'));
   add('changes', wording('changes'));
   return out;
@@ -140,6 +144,15 @@ function when(p: Project, date: string, time: string, dateRef: FieldRef, timeRef
 }
 
 /** Full campaign brief: schedule, format, games, daily missions, prizes, then the T&C. */
+/** Turns '[MISSING: …]' inside a Daily Promo line into a marker that jumps to the planner. */
+function splitMissing(line: string, label: string): Seg[] {
+  const i = line.indexOf('[MISSING:');
+  if (i < 0) return [text(line)];
+  const j = line.indexOf(']', i);
+  const id = label === 'Time zone' ? 'dp-tz' : `dp-policy-${label.toLowerCase().replace(/[^a-z]+/g, '-')}`;
+  return [text(line.slice(0, i)), missing({ tab: 'daily', id, label: label === 'Time zone' ? 'Time zone' : `${label} policy` }), text(line.slice(j + 1))];
+}
+
 export function briefBlocks(p: Project, t: MasterTemplate): Block[] {
   const b: Block[] = [];
   const kv = (label: string, segs: Seg[]) => b.push({ kind: 'kv', label, segs });

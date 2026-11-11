@@ -6,6 +6,7 @@ import type { SimMission } from '../../sim/engine';
 import { simMissionsForDay } from '../../sim/days';
 import type { Milestone } from '../timeline/timeline';
 import type { SplitState } from '../split/split';
+import { normalizeDaily, type DailyPlan } from '../daily/plan';
 
 export type PromoType = 'cross-game-mission' | 'tournament' | 'other';
 export type RewardMethod = 'fcfs' | 'leaderboard' | 'random-draw' | 'custom';
@@ -130,6 +131,8 @@ export interface Project {
   split: SplitState | null;
   timeline: Milestone[] | null;
   tc: { editedText: string | null; editedBase: string | null; mode: 'brief' | 'tc' };
+  /** Daily Promo plan (versioned; null until the planner is first used). */
+  daily: DailyPlan | null;
 }
 
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
@@ -157,6 +160,7 @@ export function blankProject(name = 'New promotion'): Project {
     split: null,
     timeline: null,
     tc: { editedText: null, editedBase: null, mode: 'brief' },
+    daily: null,
   };
 }
 
@@ -197,7 +201,18 @@ export function normalize(raw: Partial<Project>): Project {
     tc: { ...b.tc, ...r.tc },
     days: Array.isArray(r.days) ? r.days.map((d) => ({ ...blankDay(), ...d })) : [],
     estimates: r.estimates ?? {},
+    daily: readDaily(r.daily),
   };
 }
 
 export const tasksKey = (tasks: SimMission[]) => JSON.stringify(tasks.map((t) => [t.game, t.kind, t.threshold ?? null, t.target]));
+
+/** Repairs a stored Daily Promo plan; a plan from a newer version is kept as stored, never dropped. */
+function readDaily(raw: unknown): DailyPlan | null {
+  if (raw == null) return null;
+  try {
+    return normalizeDaily(raw).plan;
+  } catch {
+    return raw as DailyPlan;
+  }
+}

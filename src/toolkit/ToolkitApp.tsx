@@ -1,5 +1,5 @@
 // Promo Toolkit shell: four tools on one shared Promotion Project.
-// Mission Calculator → Promo Checker → Promotion Timeline → T&C Generator.
+// Mission Calculator → Promo Checker → Daily Promo → Promotion Timeline → T&C Generator.
 
 import { useEffect, useMemo, useState } from 'react';
 import TimerApp, { type CalcBridge } from '../timer/TimerApp';
@@ -13,6 +13,7 @@ import { blankDay, tasksKey } from './model/project';
 import { useProjects } from './model/store';
 import { checkProject, countBy } from './rules/checks';
 import { PromoChecker } from './pages/PromoChecker';
+import { DailyPromo } from './pages/DailyPromo';
 import { TcGenerator } from './pages/TcGenerator';
 import { TimelinePage } from './pages/Timeline';
 import { tcBlocks, toPlain } from './tc/generate';
@@ -21,6 +22,7 @@ import { loadMaster, type MasterTemplate } from './tc/master';
 const TABS: { id: Tab; label: string }[] = [
   { id: 'calculator', label: 'Mission Calculator' },
   { id: 'checker', label: 'Promo Checker' },
+  { id: 'daily', label: 'Daily Promo' },
   { id: 'timeline', label: 'Promotion Timeline' },
   { id: 'tc', label: 'T&C Generator' },
 ];
@@ -196,6 +198,7 @@ export default function ToolkitApp() {
       {tab !== 'calculator' && (
         <main className="t-wrap t-main">
           {tab === 'checker' && <PromoChecker master={master} onOpenInCalc={openInCalc} />}
+          {tab === 'daily' && <DailyPromo />}
           {tab === 'timeline' && <TimelinePage />}
           {tab === 'tc' && <TcGenerator master={master} setMaster={setMaster} />}
         </main>
