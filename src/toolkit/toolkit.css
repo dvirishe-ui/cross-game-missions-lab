@@ -292,3 +292,6 @@ textarea[readonly] { opacity: 0.75; }
 .dp-mission .k-task select { flex: 0 1 112px; min-width: 92px; }
 .dp-mission .k-task input { width: 56px; }
 .dp-mission .k-task-actions { gap: 2px; }
+.dp-boost { font-family: var(--font-mono); font-size: 0.72rem; padding: 1px 6px; border-radius: 999px; }
+.dp-boost.up { color: var(--ok); background: var(--ok-soft); }
+.dp-boost.down { color: var(--muted); background: var(--surface); }

@@ -86,6 +86,10 @@ export interface DailyPlan {
   lengthWeights: Record<string, number>;
   /** 'budget': split a total. 'per-length': a set amount per session by its length (10 min = X, 20 min = Y). */
   prizeMode: 'budget' | 'per-length';
+  /** Prize by time of day: busier hours (from the activity ranking) pay more, the same, or less. */
+  prizeByHour: 'peak' | 'even' | 'offpeak';
+  /** How strongly the hour moves the prize, percent (50 = busiest hour ≈ 1.5×, quietest ≈ 0.5×). */
+  peakStrength: number;
   lengthAmounts: Record<string, number | null>;
   payout: 'equal' | 'ranked';
   audience: { activePlayers: number | null; attemptShare: number | null; roundShare: number; switchMin: number; betsPerMin: Partial<Record<GameId, number>> };
@@ -127,6 +131,8 @@ export function defaultPlan(): DailyPlan {
     weights: { day: 'equal', session: 'length', mission: 'equal' },
     lengthWeights: { ...DEFAULT_LENGTH_WEIGHTS },
     prizeMode: 'budget',
+    prizeByHour: 'peak',
+    peakStrength: 50,
     lengthAmounts: { '10': null, '15': null, '20': null },
     payout: 'equal',
     audience: { activePlayers: null, attemptShare: null, roundShare: 1, switchMin: 1, betsPerMin: {} },
@@ -327,6 +333,20 @@ export function peakRank(start: string, tz: string): number | null {
   return i < 0 ? null : i;
 }
 
+/**
+ * Prize multiplier for a session from how busy its start hour is (your UTC ranking).
+ * Activity a runs from 1 (busiest hour) to 1/24 (quietest); factor = 1 ± strength × (2a − 1).
+ * No start time, or 'even' → 1.
+ */
+export function peakFactor(plan: Pick<DailyPlan, 'prizeByHour' | 'peakStrength'>, start: string, tz: string): number {
+  if (plan.prizeByHour === 'even') return 1;
+  const r = peakRank(start, tz);
+  if (r == null) return 1;
+  const a = 1 - r / BUSIEST_UTC_HOURS.length;
+  const k = (plan.peakStrength / 100) * (2 * a - 1);
+  return Math.max(0.05, plan.prizeByHour === 'peak' ? 1 + k : 1 - k);
+}
+
 export function placeAtBusiest(plan: DailyPlan, tz: string, days: number[] | 'all'): DailyPlan {
   const idx = days === 'all' ? plan.days.map((_, i) => i) : days;
   return {
@@ -503,6 +523,8 @@ export function normalizeDaily(raw: unknown): NormalizeResult {
     opEnd: str(r.opEnd),
     weights: { day: wm(w.day), session: w.session === 'custom' ? 'custom' : w.session === 'equal' && version >= 2 ? 'equal' : 'length', mission: wm(w.mission) },
     prizeMode: r.prizeMode === 'per-length' ? 'per-length' : 'budget',
+    prizeByHour: r.prizeByHour === 'even' ? 'even' : r.prizeByHour === 'offpeak' ? 'offpeak' : 'peak',
+    peakStrength: num(r.peakStrength, 50, 0, 100),
     lengthAmounts: { '10': null, '15': null, '20': null, ...(typeof r.lengthAmounts === 'object' && r.lengthAmounts ? Object.fromEntries(Object.entries(r.lengthAmounts as Record<string, unknown>).map(([k, v]) => [k, numOrNull(v)])) : {}) },
     lengthWeights: typeof r.lengthWeights === 'object' && r.lengthWeights ? { ...DEFAULT_LENGTH_WEIGHTS, ...(r.lengthWeights as Record<string, number>) } : { ...DEFAULT_LENGTH_WEIGHTS },
     payout: r.payout === 'ranked' ? 'ranked' : 'equal',

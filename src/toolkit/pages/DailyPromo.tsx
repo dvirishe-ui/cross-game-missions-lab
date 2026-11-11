@@ -38,6 +38,7 @@ import {
   defaultPlan,
   editDay,
   freePeakStarts,
+  peakFactor,
   peakRank,
   resizeSession,
   sizedMission,
@@ -109,7 +110,7 @@ export function DailyPromo() {
   const t = totals(plan);
   const issues = useMemo(() => validatePlan(plan, startDate, tz), [plan, startDate, tz]);
   const rows = useMemo(() => scheduleRows(plan, startDate, tz), [plan, startDate, tz]);
-  const alloc = useMemo(() => allocate(plan, budget, currency), [plan, budget, currency]);
+  const alloc = useMemo(() => allocate(plan, budget, currency, tz), [plan, budget, currency, tz]);
   const assumptions: Assumptions = { ...DEFAULT_ASSUMPTIONS, betsPerMin: plan.audience.betsPerMin, roundShare: plan.audience.roundShare, switchMin: plan.audience.switchMin };
   const errors = issues.filter((i) => i.level === 'error');
   const warnings = issues.filter((i) => i.level === 'warning');
@@ -368,6 +369,7 @@ export function DailyPromo() {
                   peaks={freePeakStarts(plan, tz, day, si)}
                   isPeak={(peakRank(s.start, tz) ?? 99) < Math.max(6, day.sessions.length)}
                   prize={sessionPrize(si)}
+                  boost={plan.prizeByHour === 'even' ? null : peakFactor(plan, s.start, tz)}
                   onSession={(fn) => editSession(si, fn)}
                   onMission={(mi, patch) => editMission(si, mi, patch)}
                   onRemove={() => editThisDay((d) => ({ ...d, sessions: d.sessions.filter((_, j) => j !== si) }))}
@@ -412,13 +414,28 @@ export function DailyPromo() {
           <Field label="Payout per slot">
             <Seg label="Payout per slot" value={plan.payout} options={[{ id: 'equal', label: 'Equal' }, { id: 'ranked', label: 'Ranked' }]} onChange={(payout) => setPlan((pl) => ({ ...pl, payout }))} />
           </Field>
-          <span />
+          <Field label="Prize by time of day">
+            <Seg
+              id="dp-by-hour"
+              label="Prize by time of day"
+              value={plan.prizeByHour}
+              options={[
+                { id: 'peak', label: 'More at peak' },
+                { id: 'even', label: 'Same' },
+                { id: 'offpeak', label: 'More off-peak' },
+              ]}
+              onChange={(prizeByHour) => setPlan((pl) => ({ ...pl, prizeByHour }))}
+            />
+          </Field>
+          {plan.prizeByHour !== 'even' && (
+            <NumberField id="dp-peak-strength" label="How much the hour counts" min={0} suffix="%" value={plan.peakStrength} onChange={(v) => v != null && setPlan((pl) => ({ ...pl, peakStrength: Math.min(100, Math.max(0, v)) }))} />
+          )}
           {plan.prizeMode === 'per-length' ? (
             DURATIONS.map((n) => (
               <NumberField
                 key={n}
                 id={`dp-amount-${n}`}
-                label={`${n}-minute session`}
+                label={`${n}-minute session${plan.prizeByHour !== 'even' ? ' (base)' : ''}`}
                 min={0}
                 suffix={currency || undefined}
                 value={plan.lengthAmounts[String(n)] ?? null}
@@ -784,6 +801,7 @@ function SessionCard({
   peaks,
   isPeak,
   prize,
+  boost,
   onSession,
   onMission,
   onRemove,
@@ -802,6 +820,8 @@ function SessionCard({
   isPeak: boolean;
   /** Session prize: money or share. */
   prize: string | null;
+  /** Prize multiplier from the start hour (null = same at every hour). */
+  boost: number | null;
   onSession: (fn: (s: DSession) => DSession) => void;
   onMission: (mi: number, patch: Partial<DMission>) => void;
   onRemove: () => void;
@@ -822,7 +842,8 @@ function SessionCard({
         <span className="k-muted">
           {s.start || '--:--'}–{row?.end?.time ?? '--:--'} {zoneLabel}
         </span>
-        {prize && <span className="dp-prize" title="This session's share of the prize pool">{prize}</span>}
+        {prize && <span className="dp-prize" title="This session's prize">{prize}</span>}
+        {boost != null && Math.abs(boost - 1) >= 0.05 && <span className={`dp-boost ${boost > 1 ? 'up' : 'down'}`} title="Prize adjusted for how busy this hour is">{boost > 1 ? '+' : '−'}{Math.round(Math.abs(boost - 1) * 100)}%</span>}
         <span className="k-day-actions">
           <button type="button" className="k-link danger" aria-label={`Remove session ${si + 1}`} title="Remove session" onClick={onRemove}>
             ✕

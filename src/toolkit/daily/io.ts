@@ -88,7 +88,7 @@ const csvCell = (v: unknown) => {
 export function exportCsv(p: Project, plan: DailyPlan): string {
   const tz = p.schedule.timezone;
   const rows = scheduleRows(plan, p.schedule.startDate, tz);
-  const alloc = allocate(plan, p.prizes.totalPool, p.prizes.currency);
+  const alloc = allocate(plan, p.prizes.totalPool, p.prizes.currency, p.schedule.timezone);
   const money = (minor: number | null) => (minor == null ? '' : fromMinor(minor, p.prizes.currency).toFixed(minorDigits(p.prizes.currency)));
   const head = ['day', 'date', 'timezone', 'session', 'start', 'end', 'duration_min', 'announcement_deadline_date', 'announcement_deadline_time', 'lead_min', 'mission', 'game', 'mission_text', 'threshold_x', 'required', 'min_bet', 'reward_mode', 'slots', 'pool_pct_of_campaign', 'pct_per_slot', 'currency', 'pool_amount', 'amount_per_slot'];
   const out = [head.join(',')];
@@ -137,7 +137,7 @@ export function announcementDraft(p: Project, plan: DailyPlan, rows: SessionRow[
   const day = first.dayIndex + 1;
   const date = first.date ? `${fmtShort(first.date)} (${fmtDate(first.date)})` : '[MISSING: start date]';
   const lines = [`${p.promo.name || 'Daily Promo'} · Day ${day}, ${date}`];
-  const alloc = allocate(plan, p.prizes.totalPool, currency);
+  const alloc = allocate(plan, p.prizes.totalPool, currency, p.schedule.timezone);
   for (const r of rows) {
     const end = r.end?.time ?? '?';
     lines.push('', `Session ${r.sessionIndex + 1}: ${r.start || '[MISSING: start]'}–${end} ${tz} (${r.session.durationMin} min)`);

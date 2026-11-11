@@ -11,7 +11,7 @@
 // remainder method with ties broken by position, so the parts always add up
 // to exactly the budget and the same inputs always give the same answer.
 
-import { lengthWeight, type DailyPlan, type DSession } from './plan';
+import { lengthWeight, peakFactor, type DailyPlan, type DSession } from './plan';
 
 /** Splits an integer total by weights; parts are integers that add up to total exactly. */
 export function largestRemainder(total: number, weights: number[]): number[] {
@@ -75,8 +75,10 @@ export interface Allocation {
 }
 
 const weightsOf = (mode: 'equal' | 'custom', items: { weight: number | null }[]) => items.map((x) => (mode === 'custom' ? (x.weight ?? 1) : 1));
-const sessionWeights = (plan: DailyPlan, items: DSession[]) =>
-  plan.weights.session === 'length' ? items.map((s) => lengthWeight(plan, s.durationMin)) : weightsOf(plan.weights.session, items);
+const sessionWeights = (plan: DailyPlan, items: DSession[], tz: string) =>
+  plan.weights.session === 'custom'
+    ? weightsOf('custom', items)
+    : items.map((s) => (plan.weights.session === 'length' ? lengthWeight(plan, s.durationMin) : 1) * peakFactor(plan, s.start, tz));
 const shares = (w: number[]) => {
   const s = w.reduce((a, b) => a + Math.max(0, b), 0);
   return w.map((x) => (s > 0 ? Math.max(0, x) / s : 1 / w.length));
@@ -87,13 +89,13 @@ const slotWeights = (plan: DailyPlan, n: number) => Array.from({ length: n }, (_
 
 const slotsOf = (plan: DailyPlan, s: DSession, mi: number) => (mi < 0 ? (s.bundleSlots ?? plan.template.bundleSlots) : (s.missions[mi]?.slots ?? 0));
 
-export function allocate(plan: DailyPlan, budget: number | null, currency: string): Allocation {
+export function allocate(plan: DailyPlan, budget: number | null, currency: string, tz = ''): Allocation {
   const flags: string[] = [];
   // Amount per session length: each session gets its own amount; the budget is their sum.
   const perLength = plan.prizeMode === 'per-length';
   const amountOf = (s: DSession) => plan.lengthAmounts[String(s.durationMin)] ?? null;
   const amountsReady = perLength && !!currency.trim() && plan.days.every((d) => d.sessions.every((s) => (amountOf(s) ?? 0) > 0));
-  const sessionMinorFixed = (s: DSession) => (amountsReady ? toMinor(amountOf(s)!, currency) : null);
+  const sessionMinorFixed = (s: DSession) => (amountsReady ? toMinor(amountOf(s)! * peakFactor(plan, s.start, tz), currency) : null);
   const budgetMinor = perLength
     ? amountsReady
       ? plan.days.reduce((a, d) => a + d.sessions.reduce((b, s) => b + sessionMinorFixed(s)!, 0), 0)
@@ -101,14 +103,14 @@ export function allocate(plan: DailyPlan, budget: number | null, currency: strin
     : budget != null && budget > 0 && currency.trim()
       ? toMinor(budget, currency)
       : null;
-  const dayW = perLength ? plan.days.map((d) => d.sessions.reduce((a, s) => a + (amountsReady ? sessionMinorFixed(s)! : lengthWeight(plan, s.durationMin)), 0)) : weightsOf(plan.weights.day, plan.days);
+  const dayW = perLength ? plan.days.map((d) => d.sessions.reduce((a, s) => a + (amountsReady ? sessionMinorFixed(s)! : lengthWeight(plan, s.durationMin) * peakFactor(plan, s.start, tz)), 0)) : weightsOf(plan.weights.day, plan.days);
   const dayShares = shares(dayW);
   const daysMinor = budgetMinor != null ? largestRemainder(budgetMinor, dayW) : plan.days.map(() => null);
   const sessionShares: number[][] = [];
   const sessionsMinor: (number | null)[][] = [];
   const pools: PoolAlloc[] = [];
   plan.days.forEach((d, di) => {
-    const sw = perLength ? d.sessions.map((x) => (amountsReady ? sessionMinorFixed(x)! : lengthWeight(plan, x.durationMin))) : sessionWeights(plan, d.sessions);
+    const sw = perLength ? d.sessions.map((x) => (amountsReady ? sessionMinorFixed(x)! : lengthWeight(plan, x.durationMin) * peakFactor(plan, x.start, tz))) : sessionWeights(plan, d.sessions, tz);
     const ss = shares(sw);
     sessionShares.push(ss.map((x) => x * dayShares[di]));
     const sm = daysMinor[di] != null ? largestRemainder(daysMinor[di]!, sw) : d.sessions.map(() => null);

@@ -38,7 +38,7 @@ describe('Daily Promo: counts', () => {
 
 describe('Daily Promo: shares and money', () => {
   it('3. equal allocation: 1/56 per mission, 1/560 per slot', () => {
-    const a = allocate(defaultPlan(), null, '');
+    const a = allocate({ ...defaultPlan(), prizeByHour: 'even' }, null, '');
     expect(a.pools).toHaveLength(56);
     for (const pool of a.pools) {
       expect(pool.share).toBeCloseTo(1 / 56, 12);
@@ -231,7 +231,7 @@ describe('Daily Promo: editing and persistence', () => {
     expect(withPlan).toMatch(/\[MISSING: Repeat winners policy\]/);
   });
   it('CSV has dates, time zone, deadlines, slots, shares and money only with a budget', () => {
-    const pr = { ...blankProject('CSV'), daily: defaultPlan() };
+    const pr = { ...blankProject('CSV'), daily: { ...defaultPlan(), prizeByHour: 'even' as const } };
     pr.schedule.startDate = '2026-12-01';
     pr.schedule.timezone = 'UTC';
     let csv = exportCsv(pr, pr.daily!).split('\n');
@@ -325,7 +325,7 @@ describe('Daily Promo: length, peak hours and prizes per length', () => {
     expect(peakRank('23:00', 'UTC+1')).toBe(0);
   });
   it('amount per session length: 10 min = X, 20 min = Y, total is their sum', () => {
-    let p = { ...defaultPlan(), prizeMode: 'per-length' as const, lengthAmounts: { '10': 100, '15': 150, '20': 200 } };
+    let p = { ...defaultPlan(), prizeByHour: 'even' as const, prizeMode: 'per-length' as const, lengthAmounts: { '10': 100, '15': 150, '20': 200 } };
     p = { ...p, days: p.days.map((d) => ({ ...d, sessions: d.sessions.map((s, i) => ({ ...s, durationMin: i === 0 ? 10 : i === 1 ? 20 : 15 })) })) };
     const a = allocate(p, 999, 'USD');
     const sess = (si: number) => a.pools.filter((x) => x.day === 0 && x.session === si).reduce((s, x) => s + x.minor!, 0);
@@ -338,7 +338,7 @@ describe('Daily Promo: length, peak hours and prizes per length', () => {
     expect(b.budgetMinor).toBeNull();
   });
   it('split a total by length: a 20-minute session gets twice a 10-minute one', () => {
-    const p = defaultPlan();
+    const p = { ...defaultPlan(), prizeByHour: 'even' as const };
     p.days = [{ ...p.days[0], sessions: [{ ...p.days[0].sessions[0], durationMin: 10 }, { ...p.days[0].sessions[1], durationMin: 20 }] }];
     const a = allocate(p, 300, 'USD');
     expect(a.sessionsMinor[0]).toEqual([10000, 20000]);
@@ -347,5 +347,23 @@ describe('Daily Promo: length, peak hours and prizes per length', () => {
     const v1 = { ...defaultPlan(), version: 1, weights: { day: 'equal', session: 'equal', mission: 'equal' } };
     expect(normalizeDaily(v1).plan.weights.session).toBe('length');
     expect(normalizeDaily({ ...v1, version: 2 }).plan.weights.session).toBe('equal');
+  });
+});
+
+describe('Daily Promo: prizes follow peak hours', () => {
+  it('busier hours get more, quieter hours less; the total stays exact', async () => {
+    const { peakFactor } = await import('./plan');
+    const p = defaultPlan(); // sessions at 20, 21, 22, 23 UTC; 22 is the busiest hour
+    expect(peakFactor(p, '22:00', 'UTC')).toBeCloseTo(1.5, 9);
+    expect(peakFactor(p, '03:00', 'UTC')).toBeLessThan(0.6);
+    expect(peakFactor({ ...p, prizeByHour: 'even' }, '22:00', 'UTC')).toBe(1);
+    expect(peakFactor({ ...p, prizeByHour: 'offpeak' }, '03:00', 'UTC')).toBeGreaterThan(1.4);
+    const a = allocate(p, 1000, 'USD', 'UTC');
+    const s = a.sessionsMinor[0] as number[];
+    expect(s[2]).toBe(Math.max(...s)); // 22:00 session
+    expect(a.totalMinor).toBe(100000);
+    // amount per length scales with the hour too
+    const b = allocate({ ...p, prizeMode: 'per-length', lengthAmounts: { '10': 100, '15': 100, '20': 100 } }, null, 'USD', 'UTC');
+    expect(b.sessionsMinor[0]![2]).toBe(15000);
   });
 });
