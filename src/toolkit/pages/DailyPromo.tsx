@@ -880,33 +880,43 @@ function SessionCard({
       )}
       <div className="dp-missions">
         {s.missions.map((m, mi) => {
-          const est: EstMission = { game: m.game, threshold: m.kind === 'catch' ? m.threshold : 1, catches: m.catches, countPer: m.countPer, chanceOverride: m.chanceOverride };
-          const ind = m.kind === 'catch' ? individualChance(est, s.durationMin, assumptions) : null;
+          const est: EstMission = { game: m.game, kind: m.kind, threshold: m.threshold, catches: m.catches, countPer: m.countPer, chanceOverride: m.chanceOverride };
+          const ind = individualChance(est, s.durationMin, assumptions);
           const fits = fitsFor === mi ? searchFits(m.game, s.durationMin, plan.feasibility, assumptions, { countPer: m.countPer, chanceOverride: m.chanceOverride }) : null;
           const noModel = modelKind(m.game, m.chanceOverride) === 'none';
           return (
             <div key={m.id} className="dp-mission">
               <div className="k-task">
-                <select aria-label="Game" value={m.game} onChange={(e) => onMission(mi, { game: e.target.value as GameId, chanceOverride: null, ...(m.kind === 'catch' ? sizedMission(e.target.value as GameId, s.durationMin, plan.feasibility) : {}) })}>
+                <select aria-label="Game" value={m.game} onChange={(e) => onMission(mi, { game: e.target.value as GameId, chanceOverride: null, ...sizedMission(e.target.value as GameId, s.durationMin, plan.feasibility, m.kind) })}>
                   {PLAN_GAMES.map((g) => (
                     <option key={g} value={g}>
                       {gameName(g)}
                     </option>
                   ))}
                 </select>
-                {m.kind === 'catch' ? (
+                <select
+                  aria-label="Mission type"
+                  className="dp-kind"
+                  value={m.kind}
+                  onChange={(e) => {
+                    const kind = e.target.value as DMission['kind'];
+                    onMission(mi, { kind, ...(kind === 'catch' && m.threshold == null ? sizedMission(m.game, s.durationMin, plan.feasibility, 'catch') : sizedMission(m.game, s.durationMin, plan.feasibility, kind)) });
+                  }}
+                >
+                  <option value="catch">catch</option>
+                  <option value="collect">collect</option>
+                  <option value="bets">place</option>
+                </select>
+                {m.kind === 'catch' && (
                   <span className="k-inline">
-                    catch
                     <input aria-label="Multiplier" type="number" min={1} step="any" value={m.threshold ?? ''} onChange={(e) => onMission(mi, { threshold: num(e.target.value) })} />×
                   </span>
-                ) : (
-                  <span className="k-inline">place</span>
                 )}
                 <span className="k-inline">
-                  <input aria-label={m.kind === 'catch' ? 'Required catches' : 'Bets'} type="number" min={1} step={1} value={m.catches ?? ''} onChange={(e) => onMission(mi, { catches: num(e.target.value) })} />
-                  {m.kind === 'catch' ? 'times' : 'bets'}
+                  <input aria-label={m.kind === 'catch' ? 'Required catches' : m.kind === 'collect' ? 'Total to collect' : 'Bets'} type="number" min={1} step={1} value={m.catches ?? ''} onChange={(e) => onMission(mi, { catches: num(e.target.value) })} />
+                  {m.kind === 'catch' ? 'times' : m.kind === 'collect' ? '× total' : 'bets'}
                 </span>
-                {m.kind === 'catch' && <span className="k-per" title={ind == null ? 'No chance model for this game' : `${Math.round(ind * 100)}% of players who ${m.game === 'aviator' ? 'bet every round' : 'play at the assumed pace'} finish in ${s.durationMin} min`}>{ind == null ? 'n/a' : `${Math.round(ind * 100)}%`}</span>}
+                {<span className="k-per" title={ind == null ? 'No chance model for this game' : `${Math.round(ind * 100)}% of players who ${m.game === 'aviator' ? 'bet every round' : 'play at the assumed pace'} finish in ${s.durationMin} min${m.kind === 'collect' ? ' (cashing out around 2×)' : m.kind === 'bets' ? ' (only depends on how many bets fit)' : ''}`}>{ind == null ? 'n/a' : `${Math.round(ind * 100)}%`}</span>}
                 <span className="k-task-actions">
                   {m.kind === 'catch' && !noModel && (
                     <button type="button" className="k-link" aria-expanded={fitsFor === mi} title="Suggest multiplier and catches for this length" onClick={() => setFitsFor(fitsFor === mi ? null : mi)}>
@@ -918,7 +928,7 @@ function SessionCard({
                   </button>
                 </span>
               </div>
-              {noModel && m.kind === 'catch' && (
+              {noModel && m.kind !== 'bets' && (
                 <div className="dp-mission-more">
                   <span className="k-inline">
                     Chance per bet <input aria-label="Chance per bet" type="number" min={0} max={1} step="any" placeholder="0.05" value={m.chanceOverride ?? ''} onChange={(e) => onMission(mi, { chanceOverride: num(e.target.value) })} />
@@ -986,12 +996,6 @@ function SessionCard({
               </select>
             ) : null,
           )}
-          {s.missions.map((m, mi) => (
-            <select key={`k-${m.id}`} aria-label={`Mission ${mi + 1} type`} value={m.kind} onChange={(e) => onMission(mi, { kind: e.target.value as DMission['kind'] })}>
-              <option value="catch">{gameName(m.game)}: catch a multiplier</option>
-              <option value="bets">{gameName(m.game)}: place bets</option>
-            </select>
-          ))}
           {plan.announceMode === 'per-session' && (
             <label className="k-inline">
               Lead <input aria-label="Lead override" type="number" min={MIN_LEAD} placeholder={String(plan.leadMin)} value={s.leadMin ?? ''} onChange={(e) => onSession((x) => ({ ...x, leadMin: num(e.target.value) }))} /> min
@@ -1035,20 +1039,16 @@ function Feasibility({ plan, day, di, setPlan, assumptions }: { plan: DailyPlan;
     if (!day) return [];
     const out: { key: string; label: string; window: number; slots: number; ind: number | null; pop: PopulationResult }[] = [];
     day.sessions.forEach((s, si) => {
-      const ms: EstMission[] = s.missions.filter((m) => m.kind === 'catch').map((m) => ({ game: m.game, threshold: m.threshold, catches: m.catches, countPer: m.countPer, chanceOverride: m.chanceOverride }));
+      const ms: EstMission[] = s.missions.map((m) => ({ game: m.game, kind: m.kind, threshold: m.threshold, catches: m.catches, countPer: m.countPer, chanceOverride: m.chanceOverride }));
       if (plan.rewardMode === 'bundle') {
         const slots = sessionSlots(plan, s);
         const indParts = ms.map((m) => individualChance(m, Math.max(0, (s.durationMin - aud.switchMin * (ms.length - 1)) / ms.length), assumptions));
-        const ind = indParts.some((x) => x == null) || ms.length < s.missions.length ? null : indParts.reduce((a, b) => a! * b!, 1);
-        out.push({ key: s.id, label: `Session ${si + 1} · all ${s.missions.length} missions`, window: s.durationMin, slots, ind, pop: ms.length < s.missions.length ? { expectedCompletions: null, pAllFill: null, fillMin: null, fillShare: null, expectedUnfilled: null, reason: '“Place bets” missions have no completion model here.' } : population({ missions: ms, slots, bundle: true, windowMin: s.durationMin }, aud, assumptions, 200, 11 + si) });
+        const ind = indParts.some((x) => x == null) ? null : indParts.reduce((a, b) => a! * b!, 1);
+        out.push({ key: s.id, label: `Session ${si + 1} · all ${s.missions.length} missions`, window: s.durationMin, slots, ind, pop: population({ missions: ms, slots, bundle: true, windowMin: s.durationMin }, aud, assumptions, 200, 11 + si) });
       } else {
         s.missions.forEach((m, mi) => {
-          const e: EstMission = { game: m.game, threshold: m.threshold, catches: m.catches, countPer: m.countPer, chanceOverride: m.chanceOverride };
-          const label = `S${si + 1} · ${gameName(m.game)} ${m.kind === 'catch' ? `${m.threshold ?? '?'}× × ${m.catches ?? '?'}` : `${m.catches ?? '?'} bets`}`;
-          if (m.kind !== 'catch') {
-            out.push({ key: m.id, label, window: s.durationMin, slots: m.slots ?? 0, ind: null, pop: { expectedCompletions: null, pAllFill: null, fillMin: null, fillShare: null, expectedUnfilled: null, reason: 'No completion model for “place bets”.' } });
-            return;
-          }
+          const e: EstMission = { game: m.game, kind: m.kind, threshold: m.threshold, catches: m.catches, countPer: m.countPer, chanceOverride: m.chanceOverride };
+          const label = `S${si + 1} · ${gameName(m.game)} ${m.kind === 'catch' ? `${m.threshold ?? '?'}× × ${m.catches ?? '?'}` : m.kind === 'collect' ? `collect ${m.catches ?? '?'}×` : `${m.catches ?? '?'} bets`}`;
           out.push({ key: m.id, label, window: s.durationMin, slots: m.slots ?? 0, ind: individualChance(e, s.durationMin, assumptions), pop: population({ missions: [e], slots: m.slots ?? 0, bundle: false, windowMin: s.durationMin }, aud, assumptions, 200, 11 + si * 10 + mi) });
         });
       }

@@ -66,6 +66,7 @@ export function importJson(text: string): ImportResult {
 export function missionText(m: DMission): string {
   const g = GAME_BY_ID[m.game]?.name ?? m.game;
   if (m.kind === 'bets') return `${g}: place ${m.catches ?? '?'} bets`;
+  if (m.kind === 'collect') return `${g}: collect ${m.catches ?? '?'}× in total`;
   const per = m.game === 'aviator' && m.countPer === 'bet' ? ' (each bet counts)' : '';
   return `${g}: cash out at ${m.threshold ?? '?'}× or more ${m.catches ?? '?'} time${m.catches === 1 ? '' : 's'}${per}`;
 }
@@ -75,6 +76,7 @@ export function qualifyingText(m: DMission, currency: string): string {
   const g = GAME_BY_ID[m.game]?.name ?? m.game;
   const bet = m.minBet != null ? ` of at least ${fmtMoney(m.minBet, currency)}` : '';
   if (m.kind === 'bets') return `Each settled ${g} bet${bet} placed during the session counts once.`;
+  if (m.kind === 'collect') return `The win multipliers of every settled ${g} bet${bet} placed during the session are added up; the mission is complete when the total reaches ${m.catches ?? '?'}×.`;
   if (m.game === 'aviator')
     return `A catch is a settled Aviator bet${bet} placed during the session that is cashed out (manually or by auto cash-out) at ${m.threshold ?? '?'}× or higher. A round reaching ${m.threshold ?? '?'}× only counts for players who had a qualifying bet in it and cashed out at or above ${m.threshold ?? '?'}×. ${m.countPer === 'bet' ? 'Each of a player’s two bets in one round counts separately.' : 'A round counts once per player, even with two bets in it.'}`;
   return `A catch is a settled ${g} bet${bet} placed during the session whose result pays ${m.threshold ?? '?'}× the stake or more.`;

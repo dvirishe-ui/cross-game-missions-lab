@@ -418,3 +418,37 @@ describe('Dice and Hi-Lo', () => {
     expect(searchFits('hi-lo', 15).length).toBeGreaterThan(0);
   });
 });
+
+describe('Daily Promo: collect and place bets', () => {
+  it('estimates collect N× and place N bets; more needed = harder', async () => {
+    const { betsAvailable } = await import('./estimate');
+    const col = (n: number) => individualChance({ game: 'aviator', kind: 'collect', threshold: null, catches: n, countPer: 'round', chanceOverride: null }, 15)!;
+    expect(col(20)).toBeGreaterThan(col(80));
+    expect(col(80)).toBeGreaterThan(0);
+    const bets = (n: number) => individualChance({ game: 'mines', kind: 'bets', threshold: null, catches: n, countPer: 'round', chanceOverride: null }, 10)!;
+    expect(betsAvailable('mines', 10)).toBe(60);
+    expect(bets(60)).toBe(1);
+    expect(bets(61)).toBe(0);
+    // place bets works even for a game without a chance model
+    expect(individualChance({ game: 'keno-80', kind: 'bets', threshold: null, catches: 10, countPer: 'round', chanceOverride: null }, 10)).toBe(1);
+  });
+  it('changing type or length re-sizes the mission and keeps it doable', async () => {
+    const { sizedMission, resizeSession } = await import('./plan');
+    const c15 = sizedMission('plinko', 15, undefined, 'collect');
+    const c20 = sizedMission('plinko', 20, undefined, 'collect');
+    expect(c20.catches!).toBeGreaterThan(c15.catches!);
+    const b10 = sizedMission('aviator', 10, undefined, 'bets');
+    expect(b10.catches!).toBeLessThanOrEqual(56); // 28 rounds × 2 bets in 10 minutes
+    const s = { ...defaultPlan().days[0].sessions[0] };
+    s.missions = s.missions.map((m) => ({ ...m, kind: 'collect' as const, ...sizedMission(m.game, 15, undefined, 'collect') }));
+    const longer = resizeSession(s, 20);
+    longer.missions.forEach((m, i) => expect(m.catches!).toBeGreaterThanOrEqual(s.missions[i].catches!));
+  });
+  it('population forecasts work for collect and bets, and the type survives save/load', () => {
+    const r = population({ missions: [{ game: 'aviator', kind: 'collect', threshold: null, catches: 40, countPer: 'round', chanceOverride: null }], slots: 10, bundle: false, windowMin: 15 }, { activePlayers: 500, attemptShare: 40 });
+    expect(r.expectedCompletions).not.toBeNull();
+    const p = defaultPlan();
+    p.days[0].sessions[0].missions[1].kind = 'collect';
+    expect(normalizeDaily(JSON.parse(JSON.stringify(p))).plan.days[0].sessions[0].missions[1].kind).toBe('collect');
+  });
+});

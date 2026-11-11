@@ -52,6 +52,8 @@ export function modelKind(game: GameId, chanceOverride: number | null): ModelKin
 
 export interface EstMission {
   game: GameId;
+  /** catch X× N times (default) · collect N× in total · place N bets. */
+  kind?: 'catch' | 'collect' | 'bets';
   threshold: number | null;
   catches: number | null;
   /** Aviator: count catches per round (default) or per bet (both bets of one round count). */
@@ -134,8 +136,32 @@ function normCdf(z: number): number {
 // ---------- individual (one player) ----------
 
 /** Chance one player completes the mission within `minutes`. null = insufficient data. */
-export function individualChance(m: EstMission, minutes: number, a: Assumptions = DEFAULT_ASSUMPTIONS): number | null {
-  if (m.threshold == null || m.catches == null || m.catches < 1 || minutes <= 0) return null;
+/** Bets one player can place in `minutes` (Aviator: rounds × bets per round × share of rounds). */
+export function betsAvailable(game: GameId, minutes: number, a: Assumptions = DEFAULT_ASSUMPTIONS): number {
+  if (game === 'aviator') return Math.floor(((minutes * 60) / meanRoundSec(a.clock)) * a.roundShare) * a.betsPerRound;
+  return Math.floor(minutes * betsPerMinFor(game, a));
+}
+
+/** Players collect by cashing out around this multiplier (same as the main calculator). */
+export const COLLECT_AT = 2;
+
+/**
+ * Collect N× in total, as an equivalent catch mission: wins of about 2× each.
+ * Aviator: a round reaching 2× pays 2× on each of the player's bets in it.
+ */
+export function asCatch(m: EstMission, a: Assumptions = DEFAULT_ASSUMPTIONS): EstMission {
+  if ((m.kind ?? 'catch') !== 'collect' || m.catches == null) return m;
+  if (m.game === 'aviator') return { ...m, kind: 'catch', threshold: COLLECT_AT, countPer: 'round', catches: Math.max(1, Math.ceil(m.catches / (COLLECT_AT * a.betsPerRound))) };
+  const g = GAME_BY_ID[m.game];
+  const pays = m.chanceOverride == null && g && EXACT_GAMES.includes(m.game) ? chanceAtLeast(g, COLLECT_AT).pays || COLLECT_AT : COLLECT_AT;
+  return { ...m, kind: 'catch', threshold: COLLECT_AT, catches: Math.max(1, Math.ceil(m.catches / pays)) };
+}
+
+export function individualChance(m0: EstMission, minutes: number, a: Assumptions = DEFAULT_ASSUMPTIONS): number | null {
+  if (m0.catches == null || m0.catches < 1 || minutes <= 0) return null;
+  if (m0.kind === 'bets') return betsAvailable(m0.game, minutes, a) >= m0.catches ? 1 : 0;
+  const m = asCatch(m0, a);
+  if (m.threshold == null || m.catches == null) return null;
   const kind = modelKind(m.game, m.chanceOverride);
   if (kind === 'none') return null;
   if (kind === 'shared-round') {
@@ -292,7 +318,9 @@ export function population(spec: PoolSpec, aud: Audience, a: Assumptions = DEFAU
       }
       return h;
     };
-    const chanceBy = (m: EstMission, T: number) => {
+    const chanceBy = (m0: EstMission, T: number) => {
+      if (m0.kind === 'bets') return individualChance(m0, T, a) ?? 0;
+      const m = asCatch(m0, a);
       if (m.game === 'aviator') return binomAtLeast(hitsBy(m, T), a.roundShare, roundsNeeded(m, a));
       return individualChance(m, T, a) ?? 0;
     };

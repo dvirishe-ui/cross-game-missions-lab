@@ -206,7 +206,7 @@ export function validatePlan(plan: DailyPlan, startDate: string, tz: string): DI
           if (m.threshold == null || !(m.threshold > 1)) add('error', `${mname}: multiplier must be above 1×.`, mw);
           else if (g && m.threshold > g.maxMultiplier) add('error', `${mname}: ${m.threshold}× is above the game's top multiplier (${g.maxMultiplier}×).`, mw);
         }
-        if (m.catches == null || !(m.catches >= 1) || !Number.isInteger(m.catches)) add('error', `${mname}: required ${m.kind === 'catch' ? 'catches' : 'bets'} must be a whole number of at least 1.`, mw);
+        if (m.catches == null || !(m.catches >= 1) || !Number.isInteger(m.catches)) add('error', `${mname}: ${m.kind === 'catch' ? 'required catches' : m.kind === 'collect' ? 'total to collect' : 'number of bets'} must be a whole number of at least 1.`, mw);
         if (plan.rewardMode === 'independent' && (m.slots == null || !(m.slots >= 1) || !Number.isInteger(m.slots))) add('error', `${mname}: winner slots must be a whole number of at least 1.`, mw);
         if (m.chanceOverride != null && !(m.chanceOverride > 0 && m.chanceOverride <= 1)) add('error', `${mname}: chance per bet must be between 0 and 1.`, mw);
         if (modelKind(m.game, m.chanceOverride) === 'none') add('info', `${mname}: no verified chance model; estimates show "Insufficient data" unless you enter a chance per bet.`, mw);

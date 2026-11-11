@@ -5,7 +5,7 @@
 
 import type { GameId } from '../../data/games';
 import { DEFAULT_POPULARITY, POPULAR_CUTOFF } from '../../data/gamePopularity';
-import { DEFAULT_FEASIBILITY, MODEL_GAMES, searchFits, type Feasibility } from './estimate';
+import { DEFAULT_FEASIBILITY, MODEL_GAMES, betsAvailable, individualChance, searchFits, type Feasibility } from './estimate';
 
 /**
  * v2: sessions can be weighted by length (v1 plans move from equal to by-length).
@@ -29,8 +29,8 @@ export type PolicyKey = 'repeatWinners' | 'unfilledSlots' | 'unawardedFunds' | '
 export interface DMission {
   id: string;
   game: GameId;
-  /** Catch a multiplier is the main type; "bets" kept for operators who need it. */
-  kind: 'catch' | 'bets';
+  /** catch X× N times · collect N× in total · place N bets (same types as the main calculator). */
+  kind: 'catch' | 'collect' | 'bets';
   threshold: number | null;
   /** catch: required catches; bets: number of bets. */
   catches: number | null;
@@ -163,7 +163,28 @@ export function defaultPlan(): DailyPlan {
 
 const fitCache = new Map<string, { threshold: number; catches: number }>();
 /** A mission sized for the window: the best fit from the search, or a safe fallback. */
-export function sizedMission(game: GameId, durationMin: number, f: Feasibility = DEFAULT_FEASIBILITY): Pick<DMission, 'threshold' | 'catches'> {
+export function sizedMission(game: GameId, durationMin: number, f: Feasibility = DEFAULT_FEASIBILITY, kind: DMission['kind'] = 'catch'): Pick<DMission, 'threshold' | 'catches'> {
+  if (kind === 'bets') {
+    // About 80% of the bets that fit the window, in steps of 5.
+    return { threshold: null, catches: Math.max(5, Math.floor((betsAvailable(game, durationMin) * 0.8) / 5) * 5) };
+  }
+  if (kind === 'collect') {
+    const key = `collect|${game}|${durationMin}|${f.minP}|${f.maxP}`;
+    let hit = fitCache.get(key);
+    if (!hit) {
+      const mid = (f.minP + f.maxP) / 200;
+      let best = { n: 10, d: Infinity };
+      for (let n = 5; n <= 3000; n += n < 50 ? 5 : n < 200 ? 10 : 50) {
+        const p = individualChance({ game, kind: 'collect', threshold: null, catches: n, countPer: 'round', chanceOverride: null }, durationMin);
+        if (p == null) break;
+        if (Math.abs(p - mid) < best.d) best = { n, d: Math.abs(p - mid) };
+        if (p < f.minP / 200) break;
+      }
+      hit = { threshold: 0, catches: best.n };
+      fitCache.set(key, hit);
+    }
+    return { threshold: null, catches: hit.catches };
+  }
   const key = `${game}|${durationMin}|${f.minP}|${f.maxP}|${f.minFill}|${f.maxFill}`;
   let hit = fitCache.get(key);
   if (!hit) {
@@ -174,8 +195,8 @@ export function sizedMission(game: GameId, durationMin: number, f: Feasibility =
   return { ...hit };
 }
 
-export function newMission(game: GameId, durationMin: number, slots: number, f?: Feasibility): DMission {
-  return { id: uid(), game, kind: 'catch', ...sizedMission(game, durationMin, f), slots, minBet: null, countPer: 'round', chanceOverride: null, weight: null };
+export function newMission(game: GameId, durationMin: number, slots: number, f?: Feasibility, kind: DMission['kind'] = 'catch'): DMission {
+  return { id: uid(), game, kind, ...sizedMission(game, durationMin, f, kind), slots, minBet: null, countPer: 'round', chanceOverride: null, weight: null };
 }
 
 /** Session #globalIndex: Aviator first, then the rotating games. */
@@ -235,7 +256,7 @@ export function resizeSession(s: DSession, durationMin: number, f?: Feasibility)
   return {
     ...s,
     durationMin,
-    missions: s.missions.map((m) => (m.kind === 'catch' && m.chanceOverride == null ? { ...m, ...sizedMission(m.game, durationMin, f) } : m)),
+    missions: s.missions.map((m) => (m.chanceOverride == null ? { ...m, ...sizedMission(m.game, durationMin, f, m.kind) } : m)),
   };
 }
 
@@ -254,7 +275,7 @@ export function regameDays(plan: DailyPlan): DailyPlan {
         sessions: d.sessions.map((s) => {
           const games = sessionGames(plan, g++, s.missions.length - 1);
           let k = 0;
-          return { ...s, missions: s.missions.map((m, i) => (i === 0 && m.game === 'aviator' ? m : { ...m, game: games[k] ?? m.game, ...sizedMission(games[k++] ?? m.game, s.durationMin, plan.feasibility) })) };
+          return { ...s, missions: s.missions.map((m, i) => (i === 0 && m.game === 'aviator' ? m : { ...m, game: games[k] ?? m.game, ...sizedMission(games[k++] ?? m.game, s.durationMin, plan.feasibility, m.kind) })) };
         }),
       };
     }),
@@ -548,7 +569,7 @@ export function normalizeDaily(raw: unknown): NormalizeResult {
     return {
       id: str(x.id) || uid(),
       game: game(x.game),
-      kind: x.kind === 'bets' ? 'bets' : 'catch',
+      kind: x.kind === 'bets' ? 'bets' : x.kind === 'collect' ? 'collect' : 'catch',
       threshold: numOrNull(x.threshold),
       catches: numOrNull(x.catches),
       slots: numOrNull(x.slots),

@@ -296,3 +296,8 @@ textarea[readonly] { opacity: 0.75; }
 .dp-boost.up { color: var(--ok); background: var(--ok-soft); }
 .dp-boost.down { color: var(--muted); background: var(--surface); }
 .dp-weighted { margin-left: auto; color: var(--model); }
+.dp-kind { flex: 0 0 auto !important; min-width: 0 !important; width: auto; font-size: 0.82rem; padding-inline: 6px 22px; }
+.dp-mission .k-task { gap: 4px; }
+.dp-mission .k-task select { flex: 0 1 100px; min-width: 80px; padding-inline: 8px 20px; }
+.dp-mission .k-task select.dp-kind { flex: 0 0 92px !important; min-width: 92px !important; }
+.dp-mission .k-task input { width: 50px; padding-inline: 6px; }
