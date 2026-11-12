@@ -528,3 +528,60 @@ describe('Balloon', () => {
     expect(searchByTime('balloon', 'catch', 10).length).toBeGreaterThan(0);
   });
 });
+
+describe('Pasted schedule', () => {
+  const RAW = `Mission Start (UTC)
+Day 1
+Day 2
+Day 3
+Day 4
+Day 5
+Day 6
+Day 716:40KenoHi-LoPlinkoDiceKenoHi-LoPlinko17:40Hi-LoPlinkoDiceKenoHi-LoPlinkoDice18:40PlinkoDiceKenoHi-LoPlinkoDiceKeno19:40DiceKenoHi-LoPlinkoDiceKenoHi-Lo20:40KenoHi-LoPlinkoDiceKenoHi-LoPlinko21:40Hi-LoPlinkoDiceKenoHi-LoPlinkoDice22:40PlinkoDiceKenoHi-LoPlinkoDiceKeno23:40DiceKenoHi-LoPlinkoDiceKenoHi-Lo`;
+  it('reads the pasted table exactly as sent (no spaces between cells)', async () => {
+    const { parseSchedule, SUPPLIED_SCHEDULE } = await import('./pasted');
+    const r = parseSchedule(RAW);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.schedule.timezone).toBe('UTC');
+    expect(r.schedule.days).toBe(7);
+    expect(r.schedule.starts).toEqual(['16:40', '17:40', '18:40', '19:40', '20:40', '21:40', '22:40', '23:40']);
+    expect(r.schedule.games[0]).toEqual(['keno', 'hi-lo', 'plinko', 'dice', 'keno', 'hi-lo', 'plinko']);
+    expect(r.schedule.games[7]).toEqual(['dice', 'keno', 'hi-lo', 'plinko', 'dice', 'keno', 'hi-lo']);
+    const tidy = parseSchedule(SUPPLIED_SCHEDULE);
+    expect(tidy.ok && tidy.schedule).toEqual(r.schedule);
+    expect(parseSchedule('16:40 Keno Dice\n17:40 Keno').ok).toBe(false);
+    expect(parseSchedule('hello').ok).toBe(false);
+  });
+  it('builds 7 days × 8 sessions of Aviator + the listed game, no errors in UTC', async () => {
+    const { parseSchedule, planFromSchedule, suppliedScheduleProject } = await import('./pasted');
+    const r = parseSchedule(RAW);
+    if (!r.ok) throw new Error('parse');
+    const plan = planFromSchedule(r.schedule);
+    const t = totals(plan);
+    expect(t.days).toBe(7);
+    expect(t.sessionsPerDay).toBe(8);
+    expect(t.missions).toBe(112);
+    expect(plan.days[3].sessions[2].start).toBe('18:40');
+    expect(plan.days[3].sessions[2].missions.map((m) => m.game)).toEqual(['aviator', 'hi-lo']);
+    expect(plan.days.every((d) => d.sessions.every((s) => s.durationMin === 20))).toBe(true);
+    const errs = validatePlan(plan, '2026-12-01', 'UTC').filter((i) => i.level === 'error');
+    expect(errs).toEqual([]);
+    const p = suppliedScheduleProject();
+    expect(p.schedule.timezone).toBe('UTC');
+    expect(p.daily?.days[0].sessions[0].missions[1].game).toBe('keno');
+  });
+  it('adds the supplied project once, opening it only for an existing user', async () => {
+    const { withSuppliedSchedule } = await import('../model/store');
+    const mem: Record<string, string> = { 'promo-toolkit/projects': '{}' };
+    const storage = { getItem: (k: string) => mem[k] ?? null, setItem: (k: string, v: string) => void (mem[k] = v) };
+    const s1 = withSuppliedSchedule(seedState(), storage);
+    expect(s1.projects).toHaveLength(2);
+    expect(s1.projects.find((p) => p.id === s1.currentId)?.promo.name).toMatch(/Keno/);
+    expect(withSuppliedSchedule(seedState(), storage).projects).toHaveLength(1); // flag set: not again
+    const fresh: Record<string, string> = {};
+    const s2 = withSuppliedSchedule(seedState(), { getItem: (k) => fresh[k] ?? null, setItem: (k, v) => void (fresh[k] = v) });
+    expect(s2.projects).toHaveLength(2);
+    expect(s2.currentId).toBe(s2.projects[0].id); // first-time visitor stays on the reference
+  });
+});

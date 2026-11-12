@@ -26,6 +26,7 @@ import {
   type PopulationResult,
 } from '../daily/estimate';
 import { announcementDraft, exportCsv, exportJson, importJson } from '../daily/io';
+import { parseSchedule, planFromSchedule, type ParsedSchedule } from '../daily/pasted';
 import {
   BUSIEST_UTC_HOURS,
   DAILY_VERSION,
@@ -682,6 +683,13 @@ export function DailyPromo() {
       <Announcements plan={plan} rows={dayRows} di={di} currency={currency} zoneLabel={zoneLabel} />
 
       {/* ---------- export ---------- */}
+      <PasteSchedule
+        onLoad={(sch) => {
+          update((x) => ({ ...x, daily: planFromSchedule(sch, x.daily ?? seed), schedule: sch.timezone ? { ...x.schedule, timezone: sch.timezone } : x.schedule }));
+          setDayIdx(0);
+        }}
+      />
+
       <Section title="Export and import" id="dp-export">
         <div className="k-row">
           <button type="button" className="t-btn" onClick={() => doExport('csv')}>
@@ -712,6 +720,42 @@ export function DailyPromo() {
 
       <Assumptions plan={plan} setPlan={setPlan} tz={tz} />
     </div>
+  );
+}
+
+// ---------- paste a schedule ----------
+
+function PasteSchedule({ onLoad }: { onLoad: (s: ParsedSchedule) => void }) {
+  const [text, setText] = useState('');
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const parsed = text.trim() ? parseSchedule(text) : null;
+  return (
+    <Section title="Paste a schedule" id="dp-paste" collapsible open={false} note="From a sheet or a message: times down the side, one game per day">
+      <textarea id="dp-paste-text" rows={5} placeholder={'Mission Start (UTC)  Day 1  Day 2 …\n16:40  Keno  Hi-Lo  Plinko …\n17:40  Hi-Lo  Plinko  Dice …'} value={text} onChange={(e) => (setText(e.target.value), setMsg(null))} />
+      <div className="k-row">
+        <button
+          type="button"
+          className="t-btn"
+          id="dp-paste-load"
+          disabled={!parsed?.ok}
+          onClick={() => {
+            if (!parsed?.ok) return;
+            onLoad(parsed.schedule);
+            setMsg({ ok: true, text: `Loaded ${parsed.schedule.days} days × ${parsed.schedule.starts.length} sessions. Each session is Aviator + the listed game, 20 minutes, ~10 minutes of play per mission.` });
+          }}
+        >
+          Load schedule
+        </button>
+        {parsed && !parsed.ok && <span className="k-small k-err">{parsed.error}</span>}
+        {parsed?.ok && !msg && (
+          <span className="k-small k-muted">
+            Found {parsed.schedule.days} days × {parsed.schedule.starts.length} sessions ({parsed.schedule.starts[0]}–{parsed.schedule.starts[parsed.schedule.starts.length - 1]}
+            {parsed.schedule.timezone ? ` ${parsed.schedule.timezone}` : ''}). Replaces the current days.
+          </span>
+        )}
+        {msg && <span className="k-small" role="status">{msg.text}</span>}
+      </div>
+    </Section>
   );
 }
 

@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { blankProject, normalize, referenceProject, uid, type Project } from './project';
+import { SUPPLIED_PROJECT_NAME, suppliedScheduleProject } from '../daily/pasted';
 
 export interface StoreState {
   projects: Project[];
@@ -78,8 +79,28 @@ export const actions = {
   },
 };
 
+const SEED_FLAG = 'promo-toolkit/seeded/daily-schedule-2026-11-12';
+
+/**
+ * Adds the supplied Daily Promo schedule as its own project, once. It opens
+ * for someone who already had saved projects; a first-time visitor still
+ * starts on the reference campaign. Deleting it later does not bring it back.
+ */
+export function withSuppliedSchedule(s: StoreState, storage: Pick<Storage, 'getItem' | 'setItem'> | null = safeStorage()): StoreState {
+  try {
+    if (!storage || storage.getItem(SEED_FLAG)) return s;
+    const hadData = !!storage.getItem(STORE_KEY);
+    storage.setItem(SEED_FLAG, '1');
+    if (s.projects.some((p) => p.promo.name === SUPPLIED_PROJECT_NAME)) return s;
+    const p = suppliedScheduleProject();
+    return { projects: [...s.projects, p], currentId: hadData ? p.id : s.currentId };
+  } catch {
+    return s;
+  }
+}
+
 export function useProjects() {
-  const [state, setState] = useState<StoreState>(() => loadStore());
+  const [state, setState] = useState<StoreState>(() => withSuppliedSchedule(loadStore()));
   useEffect(() => {
     const t = setTimeout(() => saveStore(state), 150);
     return () => clearTimeout(t);
