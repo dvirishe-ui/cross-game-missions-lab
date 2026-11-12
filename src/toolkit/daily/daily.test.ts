@@ -205,7 +205,7 @@ describe('Daily Promo: editing and persistence', () => {
     expect(importJson('not json').ok).toBe(false);
     expect(importJson('{"hello":1}').ok).toBe(false);
     expect(importJson(JSON.stringify({ kind: 'promo-toolkit/daily-promo', plan: { version: 99, days: [], template: {} } }))).toEqual({ ok: false, error: expect.stringMatching(/newer version/) });
-    const repaired = importJson(JSON.stringify({ kind: 'promo-toolkit/daily-promo', plan: { template: { sessionsPerDay: 'x' }, days: [{ sessions: [{ start: '20:00', missions: [{ game: 'nope', threshold: -3 }] }] }] } }));
+    const repaired = importJson(JSON.stringify({ kind: 'promo-toolkit/daily-promo', plan: { version: 4, template: { sessionsPerDay: 'x' }, days: [{ sessions: [{ start: '20:00', missions: [{ game: 'nope', threshold: -3 }] }] }] } }));
     expect(repaired.ok).toBe(true);
     if (repaired.ok) {
       expect(repaired.plan.template.sessionsPerDay).toBe(4);
@@ -237,7 +237,7 @@ describe('Daily Promo: editing and persistence', () => {
     let csv = exportCsv(pr, pr.daily!).split('\n');
     expect(csv).toHaveLength(1 + 56);
     expect(csv[0]).toMatch(/announcement_deadline_time/);
-    expect(csv[1]).toMatch(/^1,2026-12-01,UTC,1,20:00,20:15,15,2026-12-01,19:20,40,1,Aviator/);
+    expect(csv[1]).toMatch(/^1,2026-12-01,UTC,1,20:00,20:20,20,2026-12-01,19:20,40,1,Aviator/);
     expect(csv[1].split(',').slice(-2)).toEqual(['', '']);
     pr.prizes.totalPool = 5600;
     pr.prizes.currency = 'USD';
@@ -440,7 +440,7 @@ describe('Daily Promo: collect and place bets', () => {
     const b10 = sizedMission('aviator', 10, undefined, 'bets');
     expect(b10.catches!).toBeLessThanOrEqual(56); // 28 rounds × 2 bets in 10 minutes
     const s = { ...defaultPlan().days[0].sessions[0] };
-    s.missions = s.missions.map((m) => ({ ...m, kind: 'collect' as const, ...sizedMission(m.game, 15, undefined, 'collect') }));
+    s.missions = s.missions.map((m) => ({ ...m, kind: 'collect' as const, ...sizedMission(m.game, 5, undefined, 'collect') }));
     const longer = resizeSession(s, 20);
     longer.missions.forEach((m, i) => expect(m.catches!).toBeGreaterThanOrEqual(s.missions[i].catches!));
   });
@@ -478,5 +478,41 @@ describe('Daily Promo: winners and money per mission', () => {
     const n = normalizeDaily(JSON.parse(JSON.stringify(p))).plan;
     expect(n.prizeMode).toBe('per-mission');
     expect(n.days[0].sessions[0].missions[0].prize).toBe(12.5);
+  });
+});
+
+describe('Daily Promo: 20-minute sessions, ~10 minutes of play per mission', () => {
+  it('defaults: 4 sessions × 2 missions = 8 a day, 20-minute sessions, missions take ~10 min', async () => {
+    const { medianMinutes } = await import('./estimate');
+    const p = defaultPlan();
+    expect(totals(p).missionsPerDay).toBe(8);
+    for (const d of p.days) for (const s of d.sessions) {
+      expect(s.durationMin).toBe(20);
+      for (const m of s.missions) {
+        const med = medianMinutes({ game: m.game, kind: m.kind, threshold: m.threshold, catches: m.catches, countPer: m.countPer, chanceOverride: null })!;
+        expect(Math.abs(med - 10) / 10).toBeLessThanOrEqual(0.2);
+      }
+    }
+  });
+  it('suggests missions of every type for X minutes of play', async () => {
+    const { searchByTime } = await import('./estimate');
+    for (const g of ['aviator', 'mines', 'pilot-chicken', 'keno', 'hi-lo'] as const)
+      for (const k of ['catch', 'collect', 'bets'] as const) {
+        const s = searchByTime(g, k, 10);
+        expect(s.length).toBeGreaterThan(0);
+        expect(Math.abs(s[0].medianMin - 10) / 10).toBeLessThanOrEqual(0.2);
+      }
+    const five = searchByTime('mines', 'catch', 5)[0];
+    const ten = searchByTime('mines', 'catch', 10)[0];
+    expect(five.medianMin).toBeLessThan(ten.medianMin);
+  });
+  it('older plans move to 20-minute sessions', () => {
+    const old = defaultPlan();
+    old.version = 3;
+    old.days = old.days.map((d) => ({ ...d, sessions: d.sessions.map((s) => ({ ...s, durationMin: 15 })) }));
+    old.days[2].edited = true;
+    const n = normalizeDaily(JSON.parse(JSON.stringify(old))).plan;
+    expect(n.days.every((d) => d.sessions.every((s) => s.durationMin === 20))).toBe(true);
+    expect(n.template.durationMin).toBe(20);
   });
 });

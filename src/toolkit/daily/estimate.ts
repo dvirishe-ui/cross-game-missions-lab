@@ -355,3 +355,68 @@ export function population(spec: PoolSpec, aud: Audience, a: Assumptions = DEFAU
     expectedUnfilled: sumU / runs,
   };
 }
+
+// ---------- missions sized by play time ----------
+
+export interface TimedSuggestion {
+  kind: 'catch' | 'collect' | 'bets';
+  threshold: number | null;
+  catches: number;
+  /** Minutes a typical (median) player needs. */
+  medianMin: number;
+  /** Chance a player finishes within the play time. */
+  chance: number;
+  text: string;
+}
+
+/**
+ * Missions a typical player finishes in about `playMin` minutes of play on
+ * that game, best first. Catch: several catches at a moderate multiplier are
+ * preferred over one lucky high one. Collect: total around 2× wins. Bets: the
+ * bets that fit the play time.
+ */
+export function searchByTime(game: GameId, kind: 'catch' | 'collect' | 'bets', playMin: number, a: Assumptions = DEFAULT_ASSUMPTIONS, chanceOverride: number | null = null, limit = 3): TimedSuggestion[] {
+  const g = GAME_BY_ID[game];
+  if (!g || playMin <= 0) return [];
+  const base = { game, countPer: 'round' as const, chanceOverride };
+  const name = g.name;
+  const pack = (m: EstMission, text: string): TimedSuggestion | null => {
+    const med = medianMinutes(m, a, playMin * 4);
+    if (med == null) return null;
+    return { kind: (m.kind ?? 'catch') as TimedSuggestion['kind'], threshold: m.threshold, catches: m.catches!, medianMin: med, chance: individualChance(m, playMin, a) ?? 0, text };
+  };
+  if (kind === 'bets') {
+    const n = Math.max(5, Math.floor(betsAvailable(game, playMin, a) / 5) * 5);
+    const s = pack({ ...base, kind: 'bets', threshold: null, catches: n }, `${name}: place ${n} bets`);
+    return s ? [s] : [];
+  }
+  if (modelKind(game, chanceOverride) === 'none') return [];
+  const out: (TimedSuggestion & { score: number })[] = [];
+  if (kind === 'collect') {
+    for (let n = 5; n <= 5000; n += n < 50 ? 5 : n < 200 ? 10 : n < 1000 ? 25 : 100) {
+      const s = pack({ ...base, kind: 'collect', threshold: null, catches: n }, `${name}: collect ${n}× in total`);
+      if (!s) break;
+      out.push({ ...s, score: Math.abs(s.medianMin - playMin) / playMin });
+      if (s.medianMin > playMin * 1.5) break;
+    }
+  } else {
+    for (const x of THRESHOLDS) {
+      if (x > g.maxMultiplier) continue;
+      if (game !== 'aviator' && chanceOverride == null && (ownBetChance({ ...base, threshold: x, catches: 1 }) ?? 0) <= 0) continue;
+      for (let k = 1; k <= 40; k++) {
+        const s = pack({ ...base, kind: 'catch', threshold: x, catches: k }, `${name}: catch ${x}× ${k} time${k === 1 ? '' : 's'}`);
+        if (!s) break;
+        if (s.medianMin > playMin * 1.4) break;
+        const off = Math.abs(s.medianMin - playMin) / playMin;
+        if (off > 0.2) continue;
+        // Promo-friendly: a real multiplier (3× and up) caught a handful of times (2–12)
+        // beats 1.5× caught 40 times, as long as the timing is close.
+        out.push({ ...s, score: off + (x < 3 ? 0.25 : 0) + (k === 1 ? 0.1 : 0) + (k > 12 ? 0.08 + (k - 12) * 0.005 : 0) });
+      }
+    }
+  }
+  return out
+    .sort((p, q) => p.score - q.score)
+    .slice(0, limit)
+    .map(({ score: _s, ...s }) => s);
+}

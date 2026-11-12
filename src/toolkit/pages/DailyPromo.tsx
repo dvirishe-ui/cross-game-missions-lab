@@ -17,9 +17,10 @@ import {
   GAME_BY_ID,
   betsPerMinFor,
   individualChance,
+  medianMinutes,
   modelKind,
   population,
-  searchFits,
+  searchByTime,
   type Assumptions,
   type EstMission,
   type PopulationResult,
@@ -28,7 +29,8 @@ import { announcementDraft, exportCsv, exportJson, importJson } from '../daily/i
 import {
   BUSIEST_UTC_HOURS,
   DAILY_VERSION,
-  DURATIONS,
+  SESSION_MIN,
+  playMinOf,
   LENGTHS,
   MIN_LEAD,
   POLICIES,
@@ -43,7 +45,6 @@ import {
   popularGames,
   regameDays,
   peakRank,
-  resizeSession,
   sizedMission,
   newMission,
   placeAtBusiest,
@@ -145,6 +146,7 @@ export function DailyPromo() {
   const editSession = (si: number, fn: (s: DSession) => DSession) => editThisDay((d) => ({ ...d, sessions: d.sessions.map((s, j) => (j === si ? fn(s) : s)) }));
   const editMission = (si: number, mi: number, patch: Partial<DMission>) => editSession(si, (s) => ({ ...s, missions: s.missions.map((m, k) => (k === mi ? { ...m, ...patch } : m)) }));
 
+  const usedLengths = [...new Set(plan.days.flatMap((d) => d.sessions.map((x) => x.durationMin)))].sort((a, b) => a - b);
   const dayRows = rows.filter((r) => r.dayIndex === di);
   const missionPay = (si: number, mi: number) => {
     const pool = alloc.pools.find((x) => x.day === di && x.session === si && x.mission === mi);
@@ -247,10 +249,8 @@ export function DailyPromo() {
           </Field>
           <NumberField id="dp-spd" label="Sessions per day" min={1} value={plan.template.sessionsPerDay} onChange={(v) => v && v >= 1 && setTpl({ sessionsPerDay: Math.min(24, Math.round(v)) })} />
           <NumberField id="dp-mps" label="Missions per session" min={1} value={plan.template.missionsPerSession} onChange={(v) => v && v >= 1 && setTpl({ missionsPerSession: Math.min(10, Math.round(v)) })} />
-          <Field label="Session length">
-            <span className="k-row">
-              <Seg label="Session length" value={DURATIONS.includes(plan.template.durationMin) ? plan.template.durationMin : -1} options={[...DURATIONS.map((n) => ({ id: n, label: `${n} min` }))]} onChange={(n) => setTpl({ durationMin: n })} />
-            </span>
+          <Field label="Session length" hint={`~${Math.round((SESSION_MIN / Math.max(1, plan.template.missionsPerSession)) * 10) / 10} min of play per mission`}>
+            <b className="dp-fixed" id="dp-session-len">{SESSION_MIN} min</b>
           </Field>
           {plan.rewardMode === 'independent' ? (
             <NumberField id="dp-slots" label="Winner slots per mission" min={1} value={plan.template.slotsPerMission} onChange={(v) => v && v >= 1 && setTpl({ slotsPerMission: Math.round(v) })} />
@@ -412,6 +412,8 @@ export function DailyPromo() {
         )}
       </section>
 
+      <TimedMissions plan={plan} setPlan={setPlan} assumptions={assumptions} />
+
       {/* ---------- feasibility ---------- */}
       <Feasibility plan={plan} day={day} di={di} setPlan={setPlan} assumptions={assumptions} />
 
@@ -474,7 +476,7 @@ export function DailyPromo() {
           {perMission ? (
             <p className="k-small k-muted dp-wrap" style={{ gridColumn: '1 / -1' }}>Set winners and money per winner on each mission, day by day. The total budget is the sum: {hasMoney ? money(alloc.budgetMinor) : 'enter money on every mission'}.</p>
           ) : plan.prizeMode === 'per-length' ? (
-            DURATIONS.map((n) => (
+            usedLengths.map((n) => (
               <NumberField
                 key={n}
                 id={`dp-amount-${n}`}
@@ -514,7 +516,8 @@ export function DailyPromo() {
                 </Field>
               ))}
               {plan.weights.session === 'length' &&
-                DURATIONS.map((n) => (
+                usedLengths.length > 1 &&
+                usedLengths.map((n) => (
                   <NumberField key={n} id={`dp-lw-${n}`} label={`${n} min weight`} min={0} value={plan.lengthWeights[String(n)] ?? n / 10} onChange={(v) => v != null && setPlan((pl) => ({ ...pl, lengthWeights: { ...pl.lengthWeights, [String(n)]: v } }))} />
                 ))}
             </>
@@ -896,9 +899,7 @@ function SessionCard({
       </div>
       <div className="dp-session-row">
         <TimeField id={`dp-s${si}-start`} label="Start" value={s.start} onChange={(start) => onSession((x) => ({ ...x, start }))} />
-        <Field label="Length">
-          <Seg label="Length" value={s.durationMin} options={DURATIONS.map((n) => ({ id: n, label: `${n}` }))} onChange={(durationMin) => onSession((x) => resizeSession(x, durationMin, plan.feasibility))} />
-        </Field>
+        <span className="dp-len">{s.durationMin} min · ~{Math.round(playMinOf(s) * 10) / 10} min per mission</span>
       </div>
       {(better.length > 0 && !isPeak) || !s.start ? (
         <div className="dp-peaks">
@@ -915,13 +916,15 @@ function SessionCard({
       <div className="dp-missions">
         {s.missions.map((m, mi) => {
           const est: EstMission = { game: m.game, kind: m.kind, threshold: m.threshold, catches: m.catches, countPer: m.countPer, chanceOverride: m.chanceOverride };
-          const ind = individualChance(est, s.durationMin, assumptions);
-          const fits = fitsFor === mi ? searchFits(m.game, s.durationMin, plan.feasibility, assumptions, { countPer: m.countPer, chanceOverride: m.chanceOverride }) : null;
+          const play = playMinOf(s);
+          const ind = individualChance(est, play, assumptions);
+          const med = medianMinutes(est, assumptions, play * 4);
+          const fits = fitsFor === mi ? (['catch', 'collect', 'bets'] as const).flatMap((k) => searchByTime(m.game, k, play, assumptions, m.chanceOverride, k === 'catch' ? 2 : 1)) : null;
           const noModel = modelKind(m.game, m.chanceOverride) === 'none';
           return (
             <div key={m.id} className="dp-mission">
               <div className="k-task">
-                <select aria-label="Game" value={m.game} onChange={(e) => onMission(mi, { game: e.target.value as GameId, chanceOverride: null, ...sizedMission(e.target.value as GameId, s.durationMin, plan.feasibility, m.kind) })}>
+                <select aria-label="Game" value={m.game} onChange={(e) => onMission(mi, { game: e.target.value as GameId, chanceOverride: null, ...sizedMission(e.target.value as GameId, playMinOf(s), plan.feasibility, m.kind) })}>
                   {PLAN_GAMES.map((g) => (
                     <option key={g} value={g}>
                       {gameName(g)}
@@ -934,7 +937,7 @@ function SessionCard({
                   value={m.kind}
                   onChange={(e) => {
                     const kind = e.target.value as DMission['kind'];
-                    onMission(mi, { kind, ...(kind === 'catch' && m.threshold == null ? sizedMission(m.game, s.durationMin, plan.feasibility, 'catch') : sizedMission(m.game, s.durationMin, plan.feasibility, kind)) });
+                    onMission(mi, { kind, ...sizedMission(m.game, playMinOf(s), plan.feasibility, kind) });
                   }}
                 >
                   <option value="catch">catch</option>
@@ -950,10 +953,15 @@ function SessionCard({
                   <input aria-label={m.kind === 'catch' ? 'Required catches' : m.kind === 'collect' ? 'Total to collect' : 'Bets'} type="number" min={1} step={1} value={m.catches ?? ''} onChange={(e) => onMission(mi, { catches: num(e.target.value) })} />
                   {m.kind === 'catch' ? 'times' : m.kind === 'collect' ? '× total' : 'bets'}
                 </span>
-                {<span className="k-per" title={ind == null ? 'No chance model for this game' : `${Math.round(ind * 100)}% of players who ${m.game === 'aviator' ? 'bet every round' : 'play at the assumed pace'} finish in ${s.durationMin} min${m.kind === 'collect' ? ' (cashing out around 2×)' : m.kind === 'bets' ? ' (only depends on how many bets fit)' : ''}`}>{ind == null ? 'n/a' : `${Math.round(ind * 100)}%`}</span>}
+                <span
+                  className={`k-per dp-time ${med == null ? 'off' : Math.abs(med - play) / play <= 0.2 ? 'ok' : 'off'}`}
+                  title={ind == null ? 'No chance model for this game' : `Typical player needs ${med == null ? `more than ${Math.round(play * 4)}` : med.toFixed(1)} min of play (target ~${Math.round(play * 10) / 10}). ${Math.round(ind * 100)}% of players who ${m.game === 'aviator' ? 'bet every round' : 'play at the assumed pace'} finish within ${Math.round(play * 10) / 10} min${m.kind === 'collect' ? ' (cashing out around 2×)' : ''}.`}
+                >
+                  {ind == null ? 'n/a' : med == null ? `>${Math.round(play * 4)}m` : `~${med < 10 ? med.toFixed(1) : Math.round(med)}m`}
+                </span>
                 <span className="k-task-actions">
                   {m.kind === 'catch' && !noModel && (
-                    <button type="button" className="k-link" aria-expanded={fitsFor === mi} title="Suggest multiplier and catches for this length" onClick={() => setFitsFor(fitsFor === mi ? null : mi)}>
+                    <button type="button" className="k-link" aria-expanded={fitsFor === mi} title="Missions that take about this much play time" onClick={() => setFitsFor(fitsFor === mi ? null : mi)}>
                       Fits
                     </button>
                   )}
@@ -989,14 +997,12 @@ function SessionCard({
               )}
               {fits && (
                 <ul className="dp-fits">
-                  {fits.length === 0 && <li className="k-muted">Nothing fits {s.durationMin} min with the current settings.</li>}
+                  {fits.length === 0 && <li className="k-muted">Nothing takes about {Math.round(play)} min here.</li>}
                   {fits.map((f) => (
-                    <li key={`${f.threshold}-${f.catches}`}>
-                      <b>
-                        {f.threshold}× × {f.catches}
-                      </b>
-                      <span>{f.why}</span>
-                      <button type="button" className="k-link" onClick={() => (onMission(mi, { threshold: f.threshold, catches: f.catches, kind: 'catch' }), setFitsFor(null))}>
+                    <li key={`${f.kind}-${f.threshold}-${f.catches}`}>
+                      <b>~{f.medianMin < 10 ? f.medianMin.toFixed(1) : Math.round(f.medianMin)}m</b>
+                      <span>{f.text.replace(/^[^:]+: /, '')}</span>
+                      <button type="button" className="k-link" onClick={() => (onMission(mi, { threshold: f.threshold, catches: f.catches, kind: f.kind }), setFitsFor(null))}>
                         Use
                       </button>
                     </li>
@@ -1006,7 +1012,7 @@ function SessionCard({
             </div>
           );
         })}
-        <button type="button" className="k-link" onClick={() => onSession((x) => ({ ...x, missions: [...x.missions, newMission(x.missions.some((y) => y.game === 'aviator') ? (popularGames(plan.popularity).find((g) => !x.missions.some((y) => y.game === g)) ?? plan.template.rotation[0] ?? 'mines') : 'aviator', x.durationMin, plan.template.slotsPerMission, plan.feasibility)] }))}>
+        <button type="button" className="k-link" onClick={() => onSession((x) => ({ ...x, missions: [...x.missions, newMission(x.missions.some((y) => y.game === 'aviator') ? (popularGames(plan.popularity).find((g) => !x.missions.some((y) => y.game === g)) ?? plan.template.rotation[0] ?? 'mines') : 'aviator', x.durationMin / (x.missions.length + 1), plan.template.slotsPerMission, plan.feasibility)] }))}>
           + Add mission
         </button>
       </div>
@@ -1077,6 +1083,77 @@ function SessionCard({
   );
 }
 
+// ---------- missions for X minutes ----------
+
+function TimedMissions({ plan, setPlan, assumptions }: { plan: DailyPlan; setPlan: (fn: (pl: DailyPlan) => DailyPlan) => void; assumptions: Assumptions }) {
+  const defaultPlay = Math.round((SESSION_MIN / Math.max(1, plan.template.missionsPerSession)) * 10) / 10;
+  const [minutes, setMinutes] = useState<number | null>(defaultPlay);
+  const [all, setAll] = useState(false);
+  const [done, setDone] = useState<string | null>(null);
+  const games: GameId[] = all ? PLAN_GAMES.filter((g) => g !== 'keno-80') : ['aviator', ...plan.template.rotation.filter((g) => g !== 'aviator')];
+  const x = minutes && minutes > 0 ? minutes : defaultPlay;
+  const rows = useMemo(
+    () => games.map((g) => ({ g, list: (['catch', 'collect', 'bets'] as const).flatMap((k) => searchByTime(g, k, x, assumptions, null, k === 'catch' ? 2 : 1)) })),
+    [games.join(','), x, assumptions.roundShare, JSON.stringify(assumptions.betsPerMin)],
+  );
+  const applyAll = (g: GameId, f: { kind: DMission['kind']; threshold: number | null; catches: number }) => {
+    let n = 0;
+    setPlan((pl) => ({
+      ...pl,
+      days: pl.days.map((d) => ({
+        ...d,
+        sessions: d.sessions.map((s) => ({
+          ...s,
+          missions: s.missions.map((m) => (m.game === g ? (n++, { ...m, kind: f.kind, threshold: f.threshold, catches: f.catches }) : m)),
+        })),
+      })),
+    }));
+    setDone(`Applied to every ${gameName(g)} mission.`);
+  };
+  return (
+    <Section title="Missions for X minutes of play" id="dp-timed" collapsible open note={`Each mission gets ~${defaultPlay} min of a ${SESSION_MIN}-min session`}>
+      <div className="k-row">
+        <NumberField id="dp-timed-min" label="Play time" min={1} suffix="min" value={minutes} onChange={setMinutes} />
+        <label className="k-inline-check">
+          <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> All games
+        </label>
+        {done && <span className="k-small k-muted" role="status">{done}</span>}
+      </div>
+      <div className="k-tablewrap">
+        <table className="k-table" id="dp-timed-table">
+          <thead>
+            <tr>
+              <th>Game</th>
+              <th>Missions a typical player finishes in ~{x} min</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ g, list }) => (
+              <tr key={g}>
+                <td>
+                  {gameName(g)}
+                  {plan.popularity[g] != null && <small className="k-muted"> {plan.popularity[g]}%</small>}
+                </td>
+                <td className="dp-wrap">
+                  <div className="dp-timed">
+                    {list.length === 0 && <span className="k-muted">No model</span>}
+                    {list.map((f) => (
+                      <button key={`${f.kind}-${f.threshold}-${f.catches}`} type="button" className="dp-timed-chip" title={`Use for every ${gameName(g)} mission (all days). Typical ${f.medianMin.toFixed(1)} min; ${Math.round(f.chance * 100)}% finish within ${x} min.`} onClick={() => applyAll(g, f)}>
+                        {f.text.replace(/^[^:]+: /, '')} <em>~{f.medianMin < 10 ? f.medianMin.toFixed(1) : Math.round(f.medianMin)}m</em>
+                      </button>
+                    ))}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="k-small k-muted">Click a mission to use it for every mission on that game. Times are for a typical player on auto play (Aviator: betting every round, two bets).</p>
+    </Section>
+  );
+}
+
 // ---------- feasibility ----------
 
 function Feasibility({ plan, day, di, setPlan, assumptions }: { plan: DailyPlan; day: DDay | undefined; di: number; setPlan: (fn: (pl: DailyPlan) => DailyPlan) => void; assumptions: Assumptions }) {
@@ -1095,7 +1172,7 @@ function Feasibility({ plan, day, di, setPlan, assumptions }: { plan: DailyPlan;
         s.missions.forEach((m, mi) => {
           const e: EstMission = { game: m.game, kind: m.kind, threshold: m.threshold, catches: m.catches, countPer: m.countPer, chanceOverride: m.chanceOverride };
           const label = `S${si + 1} · ${gameName(m.game)} ${m.kind === 'catch' ? `${m.threshold ?? '?'}× × ${m.catches ?? '?'}` : m.kind === 'collect' ? `collect ${m.catches ?? '?'}×` : `${m.catches ?? '?'} bets`}`;
-          out.push({ key: m.id, label, window: s.durationMin, slots: m.slots ?? 0, ind: individualChance(e, s.durationMin, assumptions), pop: population({ missions: [e], slots: m.slots ?? 0, bundle: false, windowMin: s.durationMin }, aud, assumptions, 200, 11 + si * 10 + mi) });
+          out.push({ key: m.id, label, window: playMinOf(s), slots: m.slots ?? 0, ind: individualChance(e, playMinOf(s), assumptions), pop: population({ missions: [e], slots: m.slots ?? 0, bundle: false, windowMin: playMinOf(s) }, aud, assumptions, 200, 11 + si * 10 + mi) });
         });
       }
     });

@@ -306,3 +306,10 @@ textarea[readonly] { opacity: 0.75; }
 .dp-pay { font-family: var(--font-mono); color: var(--ok); }
 .dp-pool { font-family: var(--font-mono); font-weight: 600; color: var(--ok); }
 .dp-win input[aria-label^='Money'] { width: 76px; }
+.dp-fixed { font-family: var(--font-display); font-size: 1.05rem; padding: 6px 0; }
+.dp-len { font-size: 0.8rem; color: var(--muted); padding-bottom: 8px; }
+.dp-time.ok { color: var(--ok); }
+.dp-time.off { color: var(--warn); }
+.dp-timed { display: flex; flex-wrap: wrap; gap: 6px; }
+.dp-timed-chip { font-size: 0.8rem; padding: 3px 10px; }
+.dp-timed-chip em { font-style: normal; font-family: var(--font-mono); color: var(--ok); margin-left: 4px; }

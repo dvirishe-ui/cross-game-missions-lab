@@ -5,13 +5,16 @@
 
 import type { GameId } from '../../data/games';
 import { DEFAULT_POPULARITY, POPULAR_CUTOFF } from '../../data/gamePopularity';
-import { DEFAULT_FEASIBILITY, MODEL_GAMES, betsAvailable, individualChance, searchFits, type Feasibility } from './estimate';
+import { DEFAULT_FEASIBILITY, MODEL_GAMES, betsAvailable, searchByTime, type Feasibility } from './estimate';
 
 /**
  * v2: sessions can be weighted by length (v1 plans move from equal to by-length).
  * v3: games follow the regional popularity data (older plans on the old default list move to it).
+ * v4: 20-minute sessions only, missions sized to ~10 minutes of play each.
  */
-export const DAILY_VERSION = 3;
+export const DAILY_VERSION = 4;
+/** Session length: twice the play time per game (10 min of play × 2). */
+export const SESSION_MIN = 20;
 
 /** Popular games with a chance model, most popular first (default rotation). */
 export const popularGames = (pop: Record<string, number> = DEFAULT_POPULARITY): GameId[] =>
@@ -137,7 +140,7 @@ export function defaultPlan(): DailyPlan {
   const plan: DailyPlan = {
     version: DAILY_VERSION,
     days: [],
-    template: { sessionsPerDay: 4, missionsPerSession: 2, durationMin: 15, slotsPerMission: 10, bundleSlots: 10, rotation: popularGames(), gapMin: 0 },
+    template: { sessionsPerDay: 4, missionsPerSession: 2, durationMin: 20, slotsPerMission: 10, bundleSlots: 10, rotation: popularGames(), gapMin: 0 },
     rewardMode: 'independent',
     leadMin: MIN_LEAD,
     announceMode: 'per-session',
@@ -165,40 +168,26 @@ export function defaultPlan(): DailyPlan {
 
 const fitCache = new Map<string, { threshold: number; catches: number }>();
 /** A mission sized for the window: the best fit from the search, or a safe fallback. */
-export function sizedMission(game: GameId, durationMin: number, f: Feasibility = DEFAULT_FEASIBILITY, kind: DMission['kind'] = 'catch'): Pick<DMission, 'threshold' | 'catches'> {
-  if (kind === 'bets') {
-    // About 80% of the bets that fit the window, in steps of 5.
-    return { threshold: null, catches: Math.max(5, Math.floor((betsAvailable(game, durationMin) * 0.8) / 5) * 5) };
-  }
-  if (kind === 'collect') {
-    const key = `collect|${game}|${durationMin}|${f.minP}|${f.maxP}`;
-    let hit = fitCache.get(key);
-    if (!hit) {
-      const mid = (f.minP + f.maxP) / 200;
-      let best = { n: 10, d: Infinity };
-      for (let n = 5; n <= 3000; n += n < 50 ? 5 : n < 200 ? 10 : 50) {
-        const p = individualChance({ game, kind: 'collect', threshold: null, catches: n, countPer: 'round', chanceOverride: null }, durationMin);
-        if (p == null) break;
-        if (Math.abs(p - mid) < best.d) best = { n, d: Math.abs(p - mid) };
-        if (p < f.minP / 200) break;
-      }
-      hit = { threshold: 0, catches: best.n };
-      fitCache.set(key, hit);
-    }
-    return { threshold: null, catches: hit.catches };
-  }
-  const key = `${game}|${durationMin}|${f.minP}|${f.maxP}|${f.minFill}|${f.maxFill}`;
+/**
+ * A mission a typical player finishes in about `playMin` minutes of play
+ * (Andrii's guideline: ~10 minutes in the target game, 20 for the whole session).
+ */
+export function sizedMission(game: GameId, playMin: number, _f: Feasibility = DEFAULT_FEASIBILITY, kind: DMission['kind'] = 'catch'): Pick<DMission, 'threshold' | 'catches'> {
+  const key = `${kind}|${game}|${playMin}`;
   let hit = fitCache.get(key);
   if (!hit) {
-    const s = searchFits(game, durationMin, f)[0];
-    hit = s ? { threshold: s.threshold, catches: s.catches } : { threshold: game === 'aviator' ? 10 : 5, catches: 2 };
+    const s = searchByTime(game, kind, playMin)[0];
+    hit = s ? { threshold: s.threshold ?? 0, catches: s.catches } : { threshold: game === 'aviator' ? 10 : 5, catches: kind === 'bets' ? Math.max(5, Math.floor(betsAvailable(game, playMin) / 5) * 5) : 2 };
     fitCache.set(key, hit);
   }
-  return { ...hit };
+  return { threshold: kind === 'catch' ? hit.threshold : null, catches: hit.catches };
 }
 
-export function newMission(game: GameId, durationMin: number, slots: number, f?: Feasibility, kind: DMission['kind'] = 'catch'): DMission {
-  return { id: uid(), game, kind, ...sizedMission(game, durationMin, f, kind), slots, minBet: null, countPer: 'round', chanceOverride: null, weight: null, prize: null };
+/** Play time per mission: the session shared between its missions (20 min ÷ 2 = 10). */
+export const playMinOf = (s: Pick<DSession, 'durationMin' | 'missions'>) => s.durationMin / Math.max(1, s.missions.length);
+
+export function newMission(game: GameId, playMin: number, slots: number, f?: Feasibility, kind: DMission['kind'] = 'catch'): DMission {
+  return { id: uid(), game, kind, ...sizedMission(game, playMin, f, kind), slots, minBet: null, countPer: 'round', chanceOverride: null, weight: null, prize: null };
 }
 
 /** Session #globalIndex: Aviator first, then the rotating games. */
@@ -248,7 +237,7 @@ export function templateSession(plan: RotationPlan, globalIndex: number, start: 
   const missions: DMission[] = [];
   for (let j = 0; j < Math.max(1, t.missionsPerSession); j++) {
     const game: GameId = j === 0 ? 'aviator' : others[j - 1];
-    missions.push(newMission(game, t.durationMin, t.slotsPerMission, plan.feasibility));
+    missions.push(newMission(game, t.durationMin / Math.max(1, t.missionsPerSession), t.slotsPerMission, plan.feasibility));
   }
   return { id: uid(), start, durationMin: t.durationMin, missions, leadMin: null, bundleSlots: null, weight: null };
 }
@@ -258,7 +247,7 @@ export function resizeSession(s: DSession, durationMin: number, f?: Feasibility)
   return {
     ...s,
     durationMin,
-    missions: s.missions.map((m) => (m.chanceOverride == null ? { ...m, ...sizedMission(m.game, durationMin, f, m.kind) } : m)),
+    missions: s.missions.map((m) => (m.chanceOverride == null ? { ...m, ...sizedMission(m.game, durationMin / Math.max(1, s.missions.length), f, m.kind) } : m)),
   };
 }
 
@@ -277,7 +266,7 @@ export function regameDays(plan: DailyPlan): DailyPlan {
         sessions: d.sessions.map((s) => {
           const games = sessionGames(plan, g++, s.missions.length - 1);
           let k = 0;
-          return { ...s, missions: s.missions.map((m, i) => (i === 0 && m.game === 'aviator' ? m : { ...m, game: games[k] ?? m.game, ...sizedMission(games[k++] ?? m.game, s.durationMin, plan.feasibility, m.kind) })) };
+          return { ...s, missions: s.missions.map((m, i) => (i === 0 && m.game === 'aviator' ? m : { ...m, game: games[k] ?? m.game, ...sizedMission(games[k++] ?? m.game, playMinOf(s), plan.feasibility, m.kind) })) };
         }),
       };
     }),
@@ -646,7 +635,12 @@ export function normalizeDaily(raw: unknown): NormalizeResult {
   // v3: plans still on the old default game list move to the popular games.
   if (version < 3 && plan.template.rotation.join(',') === OLD_DEFAULT_ROTATION.join(',')) {
     plan.template = { ...plan.template, rotation: popularGames(plan.popularity) };
-    if (plan.days.length) return { plan: regameDays(plan), warnings };
+    if (plan.days.length) Object.assign(plan, regameDays(plan));
+  }
+  // v4: every session becomes 20 minutes; missions re-size to ~10 minutes of play each.
+  if (version < 4) {
+    plan.template = { ...plan.template, durationMin: SESSION_MIN };
+    plan.days = plan.days.map((d) => ({ ...d, sessions: d.sessions.map((s) => resizeSession(s, SESSION_MIN, plan.feasibility)) }));
   }
   if (!plan.days.length) return { plan: setLength(plan, 7, ''), warnings };
   return { plan, warnings };
