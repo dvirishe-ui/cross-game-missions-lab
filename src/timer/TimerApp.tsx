@@ -54,7 +54,7 @@ const REAL_PAST: PastDay[] = DAY_RESULTS.filter((r) => r.winners > 0).map((r) =>
 const GAMES = gameMap(SIM_GAMES);
 /** The 5–11 Oct challenge ran 5 hours a day; the "before" panel is drawn on that scale. */
 const REAL_WINDOW = 300;
-const LENGTHS = [45, 60, 120, 300, 720, 1440];
+const LENGTHS = [20, 30, 45, 60, 120, 300, 720, 1440];
 const round5 = (m: number) => Math.max(5, Math.round(m / 5) * 5);
 
 /** Axis ticks for a window of any length. */
@@ -248,6 +248,14 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
     setTol(round5(w * 0.1));
     suggestFor(goal, w);
   };
+  // Custom length from the hours and minutes boxes (either can be blank).
+  const pickCustom = () => {
+    const h = (document.getElementById('len-custom') as HTMLInputElement | null)?.value ?? '';
+    const m = (document.getElementById('len-custom-m') as HTMLInputElement | null)?.value ?? '';
+    if (!h.trim() && !m.trim()) return;
+    const total = Math.round((Number(h) || 0) * 60 + (Number(m) || 0));
+    if (total >= 10 && total !== windowMin) pickLength(total);
+  };
   const random = () => build('random');
   // Past days whose last prize went close to the target time.
   const past = [...REAL_PAST, ...(bridge?.history ?? [])];
@@ -318,17 +326,31 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
                 <span className="t-muted">or</span>
                 <input
                   id="len-custom"
-                  aria-label="Custom length in hours"
+                  aria-label="Custom length, hours"
                   type="number"
-                  min={0.25}
-                  step={0.25}
-                  placeholder="hours"
-                  key={windowMin}
-                  defaultValue={LENGTHS.includes(windowMin) ? '' : +(windowMin / 60).toFixed(2)}
-                  onKeyDown={(e) => e.key === 'Enter' && pickLength(Math.round(num((e.target as HTMLInputElement).value) * 60))}
-                  onBlur={(e) => e.target.value && pickLength(Math.round(num(e.target.value) * 60))}
+                  min={0}
+                  step={1}
+                  placeholder="0"
+                  key={`h-${windowMin}`}
+                  defaultValue={LENGTHS.includes(windowMin) ? '' : Math.floor(windowMin / 60)}
+                  onKeyDown={(e) => e.key === 'Enter' && pickCustom()}
+                  onBlur={(e) => !['len-custom', 'len-custom-m'].includes((e.relatedTarget as HTMLElement | null)?.id ?? '') && pickCustom()}
                 />
                 <span className="t-muted">h</span>
+                <input
+                  id="len-custom-m"
+                  aria-label="Custom length, minutes"
+                  type="number"
+                  min={0}
+                  max={59}
+                  step={1}
+                  placeholder="0"
+                  key={`m-${windowMin}`}
+                  defaultValue={LENGTHS.includes(windowMin) ? '' : windowMin % 60}
+                  onKeyDown={(e) => e.key === 'Enter' && pickCustom()}
+                  onBlur={(e) => !['len-custom', 'len-custom-m'].includes((e.relatedTarget as HTMLElement | null)?.id ?? '') && pickCustom()}
+                />
+                <span className="t-muted">min</span>
               </span>
             </div>
             <span className="t-muted t-small">Picks a target near the end and suggests tasks for it.</span>
@@ -560,7 +582,7 @@ export default function TimerApp({ bridge }: { bridge?: CalcBridge } = {}) {
                   <span className="t-pair">
                     <input id="target-h" aria-label="Hours" type="number" min={0} max={Math.ceil(windowMin / 60)} value={show(targetH)} onChange={(e) => setTargetH(num(e.target.value))} />
                     <span className="t-muted">h</span>
-                    <input id="target-m" aria-label="Minutes" type="number" min={0} max={59} step={5} value={show(targetM)} onChange={(e) => setTargetM(num(e.target.value))} />
+                    <input id="target-m" aria-label="Minutes" type="number" min={0} max={59} step={1} value={show(targetM)} onChange={(e) => setTargetM(num(e.target.value))} />
                     <span className="t-muted">m</span>
                     <span className="t-muted">±</span>
                     <input id="tol" type="number" min={5} max={120} step={5} value={show(tol)} onChange={(e) => setTol(num(e.target.value))} />

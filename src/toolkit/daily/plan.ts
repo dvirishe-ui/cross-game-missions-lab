@@ -529,7 +529,7 @@ export const TRADEOFFS: Record<string, string> = {
 const num = (v: unknown, d: number, min = -Infinity, max = Infinity) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : d);
 const numOrNull = (v: unknown, min = 0) => (typeof v === 'number' && Number.isFinite(v) && v >= min ? v : null);
 const str = (v: unknown, d = '') => (typeof v === 'string' ? v : d);
-const GAME_IDS: GameId[] = ['aviator', 'pilot-chicken', 'plinko', 'mines', 'goal', 'keno', 'keno-80', 'trader', 'dice', 'hi-lo'];
+const GAME_IDS: GameId[] = ['aviator', 'pilot-chicken', 'plinko', 'mines', 'goal', 'keno', 'keno-80', 'trader', 'dice', 'hi-lo', 'balloon'];
 const game = (v: unknown): GameId => (GAME_IDS.includes(v as GameId) ? (v as GameId) : 'aviator');
 
 export interface NormalizeResult {

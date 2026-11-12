@@ -23,7 +23,7 @@ export const POPULARITY: PopularityRow[] = [
   { name: 'Goal', game: 'goal', retention: 14.32, betsPerPlayer: 70 },
   { name: 'Hi-Lo', game: 'hi-lo', retention: 14.05, betsPerPlayer: 246 },
   { name: 'Plinko', game: 'plinko', retention: 10.48, betsPerPlayer: 270 },
-  { name: 'Balloon', game: null, retention: 9.76, betsPerPlayer: 9.36 },
+  { name: 'Balloon', game: 'balloon', retention: 9.76, betsPerPlayer: 9.36 },
   { name: 'Dice', game: 'dice', retention: 7.36, betsPerPlayer: 250 },
   { name: 'Hotline', game: null, retention: 4.76, betsPerPlayer: 10 },
   { name: 'Roulette', game: null, retention: 4.43, betsPerPlayer: 27 },

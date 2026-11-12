@@ -11,6 +11,7 @@ export type GameId =
   | 'trader'
   | 'dice'
   | 'hi-lo'
+  | 'balloon'
   | 'generic';
 
 export interface GameInfo {
@@ -63,6 +64,7 @@ export const GAMES: GameInfo[] = [
   { id: 'trader', name: 'Trader', code: 'TRD', sharedRound: 'unknown' },
   { id: 'dice', name: 'Dice', code: 'DIC', sourceUrl: 'https://spribe.co/games/dice', sharedRound: 'no' },
   { id: 'hi-lo', name: 'Hi-Lo', code: 'HLO', sourceUrl: 'https://spribe.co/games/hi-lo', sharedRound: 'no' },
+  { id: 'balloon', name: 'Balloon', code: 'BLN', sourceUrl: 'https://spribe.co/games/balloon', sharedRound: 'no' },
   {
     id: 'generic',
     name: 'Generic (illustrative)',
@@ -78,4 +80,4 @@ export const GAME_BY_ID: Record<GameId, GameInfo> = Object.fromEntries(GAMES.map
 >;
 
 /** Games featured in the cross-game promotion (excludes the illustrative placeholder). */
-export const CAMPAIGN_GAMES: GameId[] = ['aviator', 'pilot-chicken', 'plinko', 'mines', 'goal', 'keno', 'keno-80', 'trader', 'dice', 'hi-lo'];
+export const CAMPAIGN_GAMES: GameId[] = ['aviator', 'pilot-chicken', 'plinko', 'mines', 'goal', 'keno', 'keno-80', 'trader', 'dice', 'hi-lo', 'balloon'];

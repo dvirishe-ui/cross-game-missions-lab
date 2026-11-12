@@ -62,7 +62,7 @@ import {
 } from '../daily/plan';
 import { dayDateOf, scheduleRows, validatePlan, type DIssue, type SessionRow } from '../daily/schedule';
 
-const PLAN_GAMES: GameId[] = ['aviator', 'plinko', 'mines', 'goal', 'keno', 'trader', 'pilot-chicken', 'dice', 'hi-lo', 'keno-80'];
+const PLAN_GAMES: GameId[] = ['aviator', 'plinko', 'mines', 'goal', 'keno', 'trader', 'pilot-chicken', 'dice', 'hi-lo', 'balloon', 'keno-80'];
 const gameName = (g: GameId) => GAME_BY_ID[g]?.name ?? g;
 const pctOrDash = (x: number | null, d = 0) => (x == null ? '—' : `${(x * 100).toFixed(d)}%`);
 const kebab = (s: string) => s.toLowerCase().replace(/[^a-z]+/g, '-');
@@ -1337,7 +1337,7 @@ function Assumptions({ plan, setPlan, tz }: { plan: DailyPlan; setPlan: (fn: (pl
     { what: 'Aviator round length', value: `${meanRoundSec(DEFAULT_CLOCK).toFixed(1)} s average (5 s betting + flight + 1.5 s pause)`, kind: 'Model assumption', note: 'Public measurements; Spribe does not publish timing.' },
     { what: 'Two Aviator bets in one round', value: 'Same outcome', kind: 'Model assumption', note: 'They share the crash point, so they are never two independent chances.' },
     { what: 'Plinko, Keno, Mines, Goal chances per bet', value: 'Exact', kind: 'Observed data', note: 'Published paytables and game rules. The Aviator formula is never used for them.' },
-    { what: 'Pilot Chicken, Trader chances per bet', value: '97% ÷ X', kind: 'Model assumption', note: 'RTP rule for cash-out games with a constant 97% RTP; each player’s own result, not Aviator’s shared rounds.' },
+    { what: 'Pilot Chicken, Trader, Balloon chances per bet', value: '97% ÷ X', kind: 'Model assumption', note: 'RTP rule for cash-out games with a constant 97% RTP; each player’s own result, not Aviator’s shared rounds.' },
     { what: 'Keno 80', value: 'No model', kind: 'Not used', note: 'Insufficient data unless you enter a chance per bet.' },
     { what: 'Game popularity (1-month retention)', value: POPULARITY.filter((r) => r.game).map((r) => `${r.name} ${plan.popularity[r.game!] ?? r.retention}%`).join(', '), kind: 'Observed data', note: `${POPULARITY_SOURCE}. Decides which games are used and how often; edit below when it changes. Bets per player shown below are not used for timing (the period is not stated). "Pilot" read as Pilot Chicken.` },
     { what: 'Bets per minute (non-Aviator)', value: MODEL_GAMES.map((g) => `${gameName(g)} ${betsPerMinFor(g, a)}`).join(', '), kind: 'Model assumption', note: 'Editable below.' },

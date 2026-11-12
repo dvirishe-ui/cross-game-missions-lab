@@ -516,3 +516,15 @@ describe('Daily Promo: 20-minute sessions, ~10 minutes of play per mission', () 
     expect(n.template.durationMin).toBe(20);
   });
 });
+
+describe('Balloon', () => {
+  it('own-round crash: X× on 97% ÷ X of bets, usable in suggestions and planner', async () => {
+    const { SIM_GAMES, chanceAtLeast } = await import('../../sim/games');
+    const { searchByTime } = await import('./estimate');
+    const g = SIM_GAMES.find((x) => x.id === 'balloon')!;
+    expect(g.shared).toBe(false);
+    expect(chanceAtLeast(g, 10).p).toBeCloseTo(0.097, 9);
+    expect(individualChance({ game: 'balloon', threshold: 5, catches: 3, countPer: 'round', chanceOverride: null }, 10)).toBeGreaterThan(0);
+    expect(searchByTime('balloon', 'catch', 10).length).toBeGreaterThan(0);
+  });
+});

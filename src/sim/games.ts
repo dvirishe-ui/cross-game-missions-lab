@@ -164,6 +164,21 @@ export const SIM_GAMES: SimGame[] = [
     ],
   },
   {
+    id: 'balloon',
+    name: 'Balloon',
+    kind: 'crash',
+    rtp: 0.97,
+    rtpNote: '97% (Spribe)',
+    maxMultiplier: 10_000,
+    betsPerMin: 4,
+    shared: false,
+    how: 'Single-player crash: heat the balloon and cash out before it flies away. Each player has their own round. Cashing out at X× succeeds 97% ÷ X of the time; no official cap (operators usually cap the payout, about 10,000× at $1).',
+    sources: [
+      { label: 'Spribe: Balloon', url: 'https://spribe.co/games/balloon' },
+      { label: 'crashgames.guide: Balloon (Spribe)', url: 'https://crashgames.guide/games/balloon-spribe/' },
+    ],
+  },
+  {
     id: 'trader',
     name: 'Trader',
     kind: 'crash',

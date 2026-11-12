@@ -38,7 +38,7 @@ export const EXACT_GAMES: GameId[] = ['plinko', 'mines', 'goal', 'keno', 'dice',
  * RTP ÷ X of the time (otherwise the return at X× would not be the RTP).
  * Each player's own result; not Aviator's shared rounds. Model assumption.
  */
-export const RTP_GAMES: GameId[] = ['pilot-chicken', 'trader'];
+export const RTP_GAMES: GameId[] = ['pilot-chicken', 'trader', 'balloon'];
 /** Every game the planner can estimate (besides Aviator). */
 export const MODEL_GAMES: GameId[] = [...EXACT_GAMES, ...RTP_GAMES];
 
