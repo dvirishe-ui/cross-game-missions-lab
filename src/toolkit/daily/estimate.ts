@@ -28,6 +28,7 @@ import { DEFAULT_CLOCK, meanRoundSec, reachChance, type AviatorClock } from '../
 import { SIM_GAMES, chanceAtLeast, type SimGame } from '../../sim/games';
 import type { GameId } from '../../data/games';
 import { mulberry32 } from '../../math/rng';
+import { FITTED_SPEED } from '../../timer/days';
 
 export const GAME_BY_ID: Record<string, SimGame> = Object.fromEntries(SIM_GAMES.map((g) => [g.id, g]));
 
@@ -75,7 +76,12 @@ export interface Assumptions {
 
 export const DEFAULT_ASSUMPTIONS: Assumptions = { clock: DEFAULT_CLOCK, betsPerRound: 2, betsPerMin: {}, roundShare: 1, switchMin: 1 };
 
-export const betsPerMinFor = (game: GameId, a: Assumptions) => a.betsPerMin[game] ?? GAME_BY_ID[game]?.betsPerMin ?? 3;
+/**
+ * Bets per minute for an own-bet game: the game's base pace × the auto pace
+ * fitted to the real October campaign days (FITTED_SPEED, 1.4), the same pace
+ * the Mission Calculator uses, so both tools give the same minutes.
+ */
+export const betsPerMinFor = (game: GameId, a: Assumptions) => a.betsPerMin[game] ?? Math.round((GAME_BY_ID[game]?.betsPerMin ?? 3) * FITTED_SPEED * 10) / 10;
 
 /** Chance a single Aviator round reaches X×: RTP / X (provably-fair formula). */
 export const aviatorRoundChance = (x: number, c: AviatorClock = DEFAULT_CLOCK) => reachChance(x, c);

@@ -11,8 +11,9 @@ import { DEFAULT_FEASIBILITY, MODEL_GAMES, betsAvailable, searchByTime, type Fea
  * v2: sessions can be weighted by length (v1 plans move from equal to by-length).
  * v3: games follow the regional popularity data (older plans on the old default list move to it).
  * v4: 20-minute sessions only, missions sized to ~10 minutes of play each.
+ * v5: non-Aviator pace corrected to the fitted auto pace (×1.4, as in the Mission Calculator); missions re-size.
  */
-export const DAILY_VERSION = 4;
+export const DAILY_VERSION = 5;
 /** Session length: twice the play time per game (10 min of play × 2). */
 export const SESSION_MIN = 20;
 
@@ -637,10 +638,17 @@ export function normalizeDaily(raw: unknown): NormalizeResult {
     plan.template = { ...plan.template, rotation: popularGames(plan.popularity) };
     if (plan.days.length) Object.assign(plan, regameDays(plan));
   }
+  if (version < 5) {
+    const raw: Record<string, number> = { plinko: 12, mines: 6, goal: 6, keno: 6, dice: 12, 'hi-lo': 6, 'pilot-chicken': 6, trader: 4, balloon: 4 };
+    plan.audience = { ...plan.audience, betsPerMin: Object.fromEntries(Object.entries(plan.audience.betsPerMin).filter(([g, v]) => raw[g] !== v)) };
+  }
   // v4: every session becomes 20 minutes; missions re-size to ~10 minutes of play each.
   if (version < 4) {
     plan.template = { ...plan.template, durationMin: SESSION_MIN };
     plan.days = plan.days.map((d) => ({ ...d, sessions: d.sessions.map((s) => resizeSession(s, SESSION_MIN, plan.feasibility)) }));
+  } else if (version < 5) {
+    // Sizes made with the old, too slow pace: re-size every mission to its play time again.
+    plan.days = plan.days.map((d) => ({ ...d, sessions: d.sessions.map((s) => resizeSession(s, s.durationMin, plan.feasibility)) }));
   }
   if (!plan.days.length) return { plan: setLength(plan, 7, ''), warnings };
   return { plan, warnings };

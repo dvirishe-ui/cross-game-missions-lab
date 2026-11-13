@@ -4,7 +4,7 @@ import { actions, loadStore, saveStore, seedState, type StoreState } from '../mo
 import { tcBlocks, toPlain } from '../tc/generate';
 import { loadMaster } from '../tc/master';
 import { allocate, largestRemainder, slotScenario } from './allocate';
-import { aviatorRoundChance, binomAtLeast, individualChance, population, searchFits } from './estimate';
+import { aviatorRoundChance, binomAtLeast, individualChance, medianMinutes, population, searchFits } from './estimate';
 import { exportCsv, exportJson, importJson } from './io';
 import { copyDay, defaultPlan, editDay, normalizeDaily, setLength, setTemplate, suggestStarts, totals, type DailyPlan } from './plan';
 import { fromInstant, localTimeStatus, scheduleRows, validatePlan } from './schedule';
@@ -205,7 +205,7 @@ describe('Daily Promo: editing and persistence', () => {
     expect(importJson('not json').ok).toBe(false);
     expect(importJson('{"hello":1}').ok).toBe(false);
     expect(importJson(JSON.stringify({ kind: 'promo-toolkit/daily-promo', plan: { version: 99, days: [], template: {} } }))).toEqual({ ok: false, error: expect.stringMatching(/newer version/) });
-    const repaired = importJson(JSON.stringify({ kind: 'promo-toolkit/daily-promo', plan: { version: 4, template: { sessionsPerDay: 'x' }, days: [{ sessions: [{ start: '20:00', missions: [{ game: 'nope', threshold: -3 }] }] }] } }));
+    const repaired = importJson(JSON.stringify({ kind: 'promo-toolkit/daily-promo', plan: { version: 5, template: { sessionsPerDay: 'x' }, days: [{ sessions: [{ start: '20:00', missions: [{ game: 'nope', threshold: -3 }] }] }] } }));
     expect(repaired.ok).toBe(true);
     if (repaired.ok) {
       expect(repaired.plan.template.sessionsPerDay).toBe(4);
@@ -426,9 +426,9 @@ describe('Daily Promo: collect and place bets', () => {
     expect(col(20)).toBeGreaterThan(col(80));
     expect(col(80)).toBeGreaterThan(0);
     const bets = (n: number) => individualChance({ game: 'mines', kind: 'bets', threshold: null, catches: n, countPer: 'round', chanceOverride: null }, 10)!;
-    expect(betsAvailable('mines', 10)).toBe(60);
-    expect(bets(60)).toBe(1);
-    expect(bets(61)).toBe(0);
+    expect(betsAvailable('mines', 10)).toBe(84); // 6 bets/min × 1.4 fitted auto pace
+    expect(bets(84)).toBe(1);
+    expect(bets(85)).toBe(0);
     // place bets works even for a game without a chance model
     expect(individualChance({ game: 'keno-80', kind: 'bets', threshold: null, catches: 10, countPer: 'round', chanceOverride: null }, 10)).toBe(1);
   });
@@ -583,5 +583,33 @@ Day 716:40KenoHi-LoPlinkoDiceKenoHi-LoPlinko17:40Hi-LoPlinkoDiceKenoHi-LoPlinkoD
     const s2 = withSuppliedSchedule(seedState(), { getItem: (k) => fresh[k] ?? null, setItem: (k, v) => void (fresh[k] = v) });
     expect(s2.projects).toHaveLength(2);
     expect(s2.currentId).toBe(s2.projects[0].id); // first-time visitor stays on the reference
+  });
+});
+
+describe('Daily Promo and Mission Calculator agree on minutes', () => {
+  it('a typical player needs about the same time in both tools, for every non-Aviator game', async () => {
+    const { simulateDay } = await import('../../timer/model');
+    const { DEFAULT_CLOCK } = await import('../../timer/clock');
+    const { FITTED_SPEED } = await import('../../timer/days');
+    const { gameMap } = await import('../../sim/engine');
+    const { SIM_GAMES } = await import('../../sim/games');
+    const { medianMinutes } = await import('./estimate');
+    const G = gameMap(SIM_GAMES);
+    for (const id of ['keno', 'plinko', 'mines', 'goal', 'dice', 'hi-lo', 'pilot-chicken', 'balloon'] as const) {
+      const main = simulateDay([{ game: id, kind: 'catch', threshold: 5, target: 5 }], G, { players: 100, prizes: 50, windowMin: 600, betsPerRound: 2, clock: DEFAULT_CLOCK, speed: FITTED_SPEED, spread: 0.5, runs: 60, seed: 3 }, 600).missionNthMedian[0];
+      const daily = medianMinutes({ game: id, kind: 'catch', threshold: 5, catches: 5, countPer: 'round', chanceOverride: null })!;
+      expect(Math.abs(daily / main - 1)).toBeLessThan(0.15);
+    }
+  }, 60_000);
+  it('older plans re-size to the corrected pace', () => {
+    const old = defaultPlan();
+    old.version = 4;
+    old.days[0].sessions[0].missions[1] = { ...old.days[0].sessions[0].missions[1], game: 'mines', kind: 'catch', threshold: 10, catches: 6 };
+    old.audience.betsPerMin = { mines: 6 };
+    const n = normalizeDaily(JSON.parse(JSON.stringify(old))).plan;
+    expect(n.audience.betsPerMin.mines).toBeUndefined();
+    const m = n.days[0].sessions[0].missions[1];
+    const med = medianMinutes({ game: m.game, kind: m.kind, threshold: m.threshold, catches: m.catches, countPer: m.countPer, chanceOverride: null })!;
+    expect(Math.abs(med - 10) / 10).toBeLessThanOrEqual(0.2); // re-sized to ~10 min at the corrected pace
   });
 });
